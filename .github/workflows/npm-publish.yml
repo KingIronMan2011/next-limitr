@@ -92,18 +92,18 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false' && steps.check_npm.outputs.published == 'false'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.package_version.outputs.version }}
-          release_name: Release v${{ steps.package_version.outputs.version }}
+          name: Release v${{ steps.package_version.outputs.version }}
           body: |
             Release version ${{ steps.package_version.outputs.version }}
             
             See [CHANGELOG](https://github.com/KingIronMan2011/next-limitr/blob/main/CHANGELOG.md) for details.
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Skip publishing (already published)
         if: steps.check_npm.outputs.published == 'true'
