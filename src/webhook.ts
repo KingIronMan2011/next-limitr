@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { WebhookConfig, RateLimitUsage } from "./types";
-import fetch from "node-fetch";
+import axios from "axios";
 
 function getClientIp(req: import("next/server").NextRequest): string {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -31,17 +31,19 @@ export class WebhookHandler {
             usage,
           };
 
-      const response = await fetch(url, {
-        method,
+      const response = await axios.request({
+        url,
+        method: method as any,
         headers: {
           "Content-Type": "application/json",
           ...headers,
         },
-        body: JSON.stringify(body),
+        data: body,
+        validateStatus: () => true,
       });
 
-      if (!response.ok) {
-        console.error("Webhook notification failed:", await response.text());
+      if (response.status < 200 || response.status >= 300) {
+        console.error("Webhook notification failed:", response.data);
       }
     } catch (error) {
       console.error("Error sending webhook notification:", error);

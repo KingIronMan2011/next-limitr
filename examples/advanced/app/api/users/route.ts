@@ -1,13 +1,18 @@
 import { NextResponse, NextRequest } from "next/server";
 import { withRateLimit, RateLimitStrategy, RateLimitUsage } from "@kingironman2011/next-limitr";
-import { Redis } from "ioredis";
+import { createClient, type RedisClientType } from "redis";
 
 // Initialize Redis client
-const redis = new Redis({
-  host: process.env.REDIS_HOST || "localhost",
-  port: parseInt(process.env.REDIS_PORT || "6379"),
+const redis: RedisClientType = createClient({
+  socket: {
+    host: process.env.REDIS_HOST || "localhost",
+    port: parseInt(process.env.REDIS_PORT || "6379"),
+  },
   password: process.env.REDIS_PASSWORD,
 });
+// start connecting in background
+redis.connect().catch(() => {});
+
 
 // Custom alert function
 async function sendSlackAlert(message: string) {

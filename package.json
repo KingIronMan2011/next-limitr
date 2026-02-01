@@ -24,7 +24,7 @@
     "publish": "npm publish"
   },
   "dependencies": {
-    "node-fetch": "^3.3.2",
+    "axios": "^1.13.4",
     "redis": "^5.10.0"
   },
   "devDependencies": {
