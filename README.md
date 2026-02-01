@@ -6,6 +6,8 @@ A powerful and flexible rate limiting middleware for Next.js API routes, featuri
 
 [![npm version](https://badge.fury.io/js/@kingironman2011/next-limitr.svg)](https://badge.fury.io/js/@kingironman2011/next-limitr)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/KingIronMan2011/next-limitr/actions/workflows/ci.yml/badge.svg)](https://github.com/KingIronMan2011/next-limitr/actions/workflows/ci.yml)
+[![Publish](https://github.com/KingIronMan2011/next-limitr/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/KingIronMan2011/next-limitr/actions/workflows/npm-publish.yml)
 
 ## Features
 
@@ -188,6 +190,21 @@ The middleware adds standard rate limit headers to responses:
 ## Contributing
 
 Contributions are welcome! Please read our [contributing guidelines](CONTRIBUTING.md) for details.
+
+## Continuous Integration
+
+This project uses GitHub Actions for continuous integration and deployment:
+
+- **CI Workflow**: Automatically runs on every push and pull request to ensure code quality
+  - Prettier formatting check
+  - ESLint linting
+  - Test suite
+  - Build verification
+
+- **Publish Workflow**: Automatically publishes new versions to npm and GitHub Packages
+  - Checks for existing versions to prevent duplicate releases
+  - Creates Git tags and GitHub releases
+  - Uses npm provenance for enhanced security
 
 ## License
 
