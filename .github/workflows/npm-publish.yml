@@ -1,0 +1,111 @@
+name: Publish to npm and GitHub
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Get package version
+        id: package_version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Check if version is already published to npm
+        id: check_npm
+        run: |
+          VERSION=${{ steps.package_version.outputs.version }}
+          if npm view @kingironman2011/next-limitr@$VERSION version 2>/dev/null; then
+            echo "published=true" >> $GITHUB_OUTPUT
+            echo "Version $VERSION already exists on npm"
+          else
+            echo "published=false" >> $GITHUB_OUTPUT
+            echo "Version $VERSION does not exist on npm"
+          fi
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          VERSION=${{ steps.package_version.outputs.version }}
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag v$VERSION does not exist"
+          fi
+
+      - name: Publish to npm
+        if: steps.check_npm.outputs.published == 'false'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Setup Node.js for GitHub Packages
+        if: steps.check_npm.outputs.published == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@kingironman2011'
+
+      - name: Publish to GitHub Packages
+        if: steps.check_npm.outputs.published == 'false'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Git tag
+        if: steps.check_tag.outputs.exists == 'false' && steps.check_npm.outputs.published == 'false'
+        run: |
+          VERSION=${{ steps.package_version.outputs.version }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.exists == 'false' && steps.check_npm.outputs.published == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.package_version.outputs.version }}
+          name: Release v${{ steps.package_version.outputs.version }}
+          body: |
+            Release version ${{ steps.package_version.outputs.version }}
+            
+            See [CHANGELOG](https://github.com/KingIronMan2011/next-limitr/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Skip publishing (already published)
+        if: steps.check_npm.outputs.published == 'true'
+        run: |
+          echo "Version ${{ steps.package_version.outputs.version }} is already published. Skipping publish step."
