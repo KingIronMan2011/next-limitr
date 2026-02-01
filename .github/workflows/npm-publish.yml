@@ -63,9 +63,9 @@ jobs:
 
       - name: Publish to npm
         if: steps.check_npm.outputs.published == 'false'
-        run: npm publish --provenance --access public
+        run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
 
       - name: Setup Node.js for GitHub Packages
         if: steps.check_npm.outputs.published == 'false'
