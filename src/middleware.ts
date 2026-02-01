@@ -22,7 +22,10 @@ const DEFAULT_OPTIONS: Partial<RateLimitOptions> = {
 };
 
 export function withRateLimit(options: RateLimitOptions = {}) {
-  const finalOptions = { ...DEFAULT_OPTIONS, ...options };
+  const finalOptions: RateLimitOptions = {
+    ...(DEFAULT_OPTIONS as RateLimitOptions),
+    ...options,
+  };
   let storage: StorageAdapter;
   let webhookHandler: WebhookHandler | undefined;
 
@@ -51,7 +54,7 @@ export function withRateLimit(options: RateLimitOptions = {}) {
     ): Promise<NextResponse> {
       // Check if we should skip rate limiting
       if (finalOptions.skip && (await finalOptions.skip(req))) {
-        return handler(req);
+        return handler(req) as Promise<NextResponse>;
       }
 
       // Generate key for rate limiting
@@ -64,23 +67,26 @@ export function withRateLimit(options: RateLimitOptions = {}) {
         ? await finalOptions.getLimitForRequest(req)
         : finalOptions.limit!;
 
+      const windowMs = finalOptions.windowMs!;
+
       try {
-        // Check rate limit
-        const usage = await storage.increment(key, finalOptions.windowMs!);
+        // Increment usage from storage
+        const usage = await storage.increment(key, windowMs);
+
         const headers: Record<string, string> = {
-          "X-RateLimit-Limit": limit.toString(),
-          "X-RateLimit-Remaining": Math.max(0, limit - usage.used).toString(),
-          "X-RateLimit-Reset": usage.reset.toString(),
+          "X-RateLimit-Limit": String(limit),
+          "X-RateLimit-Remaining": String(Math.max(0, limit - usage.used)),
+          "X-RateLimit-Reset": String(usage.reset),
         };
 
         // If limit is exceeded
         if (usage.used > limit) {
-          // Add Retry-After header
-          headers["Retry-After"] = Math.ceil(
-            (usage.reset * 1000 - Date.now()) / 1000,
-          ).toString();
+          const retryAfterSec = Math.max(
+            0,
+            Math.ceil((usage.reset * 1000 - Date.now()) / 1000),
+          );
+          headers["Retry-After"] = String(retryAfterSec);
 
-          // Notify webhook if configured
           if (webhookHandler) {
             await webhookHandler.notify(req, { ...usage, limit });
           }
@@ -92,7 +98,10 @@ export function withRateLimit(options: RateLimitOptions = {}) {
 
           // Use custom handler or default response
           if (finalOptions.handler) {
-            return finalOptions.handler(req, { ...usage, limit });
+            return (await finalOptions.handler(req, {
+              ...usage,
+              limit,
+            })) as NextResponse;
           }
 
           return NextResponse.json(
@@ -104,19 +113,19 @@ export function withRateLimit(options: RateLimitOptions = {}) {
           );
         }
 
-        // Process the request normally
-        const response = await Promise.resolve(handler(req));
+        // Call original handler
+        const response = (await Promise.resolve(handler(req))) as NextResponse;
 
-        // Add rate limit headers to the response
-        Object.entries(headers).forEach(([key, value]) => {
-          response.headers.set(key, value);
+        // Attach rate limit headers
+        Object.entries(headers).forEach(([k, v]) => {
+          response.headers.set(k, v);
         });
 
         return response;
-      } catch (error) {
+      } catch (error: unknown) {
         console.error("Rate limiting error:", error);
-        // On error, allow the request to proceed
-        return handler(req);
+        // On storage or other errors, allow the request
+        return handler(req) as Promise<NextResponse>;
       }
     };
   };

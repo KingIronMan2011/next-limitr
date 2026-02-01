@@ -1,5 +1,9 @@
 import { NextResponse, NextRequest } from "next/server";
-import { withRateLimit, RateLimitStrategy, RateLimitUsage } from "@kingironman2011/next-limitr";
+import {
+  withRateLimit,
+  RateLimitStrategy,
+  RateLimitUsage,
+} from "@kingironman2011/next-limitr";
 import { createClient, type RedisClientType } from "redis";
 
 // Initialize Redis client
@@ -12,7 +16,6 @@ const redis: RedisClientType = createClient({
 });
 // start connecting in background
 redis.connect().catch(() => {});
-
 
 // Custom alert function
 async function sendSlackAlert(message: string) {
@@ -42,7 +45,11 @@ export const POST = withRateLimit({
     if (userId) return `user-${userId}`;
     const forwarded = req.headers.get("x-forwarded-for");
     if (forwarded) return forwarded.split(",")[0].trim();
-    return req.headers.get("x-real-ip") || req.headers.get("x-client-ip") || "unknown";
+    return (
+      req.headers.get("x-real-ip") ||
+      req.headers.get("x-client-ip") ||
+      "unknown"
+    );
   },
 
   // Dynamic limits based on user type

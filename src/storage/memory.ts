@@ -12,11 +12,22 @@ export class MemoryStorage implements StorageAdapter {
     this.storage = new Map();
   }
 
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [key, record] of this.storage.entries()) {
+      if (now >= record.resetTime) {
+        this.storage.delete(key);
+      }
+    }
+  }
+
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
+    this.cleanup();
+
     const now = Date.now();
     const record = this.storage.get(key);
+    const limit = Number.MAX_SAFE_INTEGER;
 
-    // If no record exists or the window has expired, create a new one
     if (!record || now >= record.resetTime) {
       const resetTime = now + windowMs;
       this.storage.set(key, {
@@ -24,22 +35,28 @@ export class MemoryStorage implements StorageAdapter {
         resetTime,
       });
 
+      const used = 1;
+      const remaining = Math.max(limit - used, 0);
+
       return {
-        limit: Infinity,
-        remaining: Infinity - 1,
+        limit,
+        remaining,
         reset: Math.floor(resetTime / 1000),
-        used: 1,
+        used,
       };
     }
 
-    // Increment existing record
     record.count += 1;
+    this.storage.set(key, record);
+
+    const used = record.count;
+    const remaining = Math.max(limit - used, 0);
 
     return {
-      limit: Infinity,
-      remaining: Infinity - record.count,
+      limit,
+      remaining,
       reset: Math.floor(record.resetTime / 1000),
-      used: record.count,
+      used,
     };
   }
 
@@ -57,15 +74,5 @@ export class MemoryStorage implements StorageAdapter {
 
   async close(): Promise<void> {
     this.storage.clear();
-  }
-
-  // Helper method to clean up expired entries
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, record] of this.storage.entries()) {
-      if (now >= record.resetTime) {
-        this.storage.delete(key);
-      }
-    }
   }
 }
