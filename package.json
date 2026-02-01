@@ -1,0 +1,47 @@
+{
+  "name": "@kingironman2011/next-limitr",
+  "version": "1.0.0",
+  "author": "KingIronMan2011",
+  "description": "A powerful rate limiting middleware for Next.js APIs with built-in webhook support and customizable alerts",
+  "license": "MIT",
+  "keywords": [
+    "nextjs",
+    "rate-limiting",
+    "middleware",
+    "api",
+    "webhook",
+    "alerts",
+    "typescript"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "publish": "npm publish"
+  },
+  "dependencies": {
+    "ioredis": "^5.6.1",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^25.1.0",
+    "@types/react": "^19.2.10",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.3.0",
+    "jiti": "^2.6.1",
+    "next": "^16.1.6",
+    "prettier": "^3.8.1",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.54.0"
+  },
+  "peerDependencies": {
+    "next": ">=16.0.0",
+    "react": ">=18.0.0"
+  }
+}
