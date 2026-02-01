@@ -24,8 +24,8 @@
     "publish": "npm publish"
   },
   "dependencies": {
-    "ioredis": "^5.6.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "redis": "^5.10.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

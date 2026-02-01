@@ -1,21 +1,27 @@
-import { Redis } from "ioredis";
+import { createClient, type RedisClientType } from "redis";
 import { StorageAdapter, RateLimitUsage, RedisConfig } from "../types";
 
 export class RedisStorage implements StorageAdapter {
-  private client: Redis;
+  private client: RedisClientType;
   private readonly keyPrefix: string = "next-limitr:";
 
-  constructor(config: RedisConfig | Redis) {
-    if (config instanceof Redis) {
-      this.client = config;
+  constructor(config: RedisConfig | RedisClientType) {
+    // Detect a redis client by presence of sendCommand (runtime check)
+    if (config && typeof (config as any).sendCommand === "function") {
+      this.client = config as RedisClientType;
     } else {
-      this.client = new Redis({
-        host: config.host,
-        port: config.port,
-        password: config.password,
-        db: config.db,
-        tls: config.tls ? {} : undefined,
+      const cfg = config as RedisConfig;
+      this.client = createClient({
+        socket: {
+          host: cfg.host,
+          port: cfg.port,
+          tls: cfg.tls ? true : undefined,
+        },
+        password: cfg.password,
+        database: cfg.db,
       });
+      // start connecting in background
+      this.client.connect().catch(() => {});
     }
   }
 
@@ -28,27 +34,22 @@ export class RedisStorage implements StorageAdapter {
     const now = Date.now();
     const resetTime = now + windowMs;
 
-    // Use Redis transaction to ensure atomicity
+    // Use Redis multi to ensure atomicity
     const result = await this.client
       .multi()
       .incr(redisKey)
-      .pexpire(redisKey, windowMs)
+      .pExpire(redisKey, windowMs)
       .exec();
 
-    if (!result) {
+    if (!result || result.length === 0) {
       throw new Error("Redis transaction failed");
     }
 
-    const [[incrErr, countResult]] = result;
-    if (incrErr) {
-      throw incrErr;
-    }
-
-    // Ensure count is a number
+    const countResult = result[0] as unknown;
     const count =
       typeof countResult === "number"
         ? countResult
-        : parseInt(countResult as string, 10);
+        : parseInt(String(countResult), 10);
     if (isNaN(count)) {
       throw new Error("Invalid count value from Redis");
     }
@@ -62,9 +63,10 @@ export class RedisStorage implements StorageAdapter {
   }
 
   async decrement(key: string): Promise<void> {
-    const exists = await this.client.exists(this.getKey(key));
+    const redisKey = this.getKey(key);
+    const exists = (await this.client.exists(redisKey)) > 0;
     if (exists) {
-      await this.client.decr(this.getKey(key));
+      await this.client.decr(redisKey);
     }
   }
 

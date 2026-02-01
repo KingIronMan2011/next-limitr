@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import type { Redis } from "ioredis";
+import type { RedisClientType } from "redis";
 
 export enum RateLimitStrategy {
   FIXED_WINDOW = "fixed-window",
@@ -40,7 +40,7 @@ export interface RateLimitOptions {
   // Storage options
   storage?: StorageType;
   redisConfig?: RedisConfig;
-  redisClient?: Redis;
+  redisClient?: RedisClientType;
 
   // Webhook and alert options
   webhook?: WebhookConfig;
