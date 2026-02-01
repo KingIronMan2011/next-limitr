@@ -78,6 +78,7 @@ This project uses GitHub Actions for CI/CD:
 ### CI Workflow (`.github/workflows/ci.yml`)
 
 Runs on every push and pull request to `main`:
+
 - **Prettier Check**: Ensures code formatting is consistent
 - **ESLint**: Checks for code quality issues
 - **Tests**: Runs the full test suite
@@ -86,6 +87,7 @@ Runs on every push and pull request to `main`:
 ### Publish Workflow (`.github/workflows/npm-publish.yml`)
 
 Runs on push to `main` and can be triggered manually:
+
 - **Version Check**: Verifies if the current version is already published
 - **npm Publish**: Publishes to npm using trusted publishing (provenance)
 - **GitHub Packages**: Publishes to GitHub Packages

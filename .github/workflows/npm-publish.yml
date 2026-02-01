@@ -23,9 +23,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "24"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: npm ci
@@ -71,9 +71,9 @@ jobs:
         if: steps.check_npm.outputs.published == 'false'
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@kingironman2011'
+          node-version: "24"
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@kingironman2011"
 
       - name: Publish to GitHub Packages
         if: steps.check_npm.outputs.published == 'false'
@@ -98,7 +98,7 @@ jobs:
           name: Release v${{ steps.package_version.outputs.version }}
           body: |
             Release version ${{ steps.package_version.outputs.version }}
-            
+
             See [CHANGELOG](https://github.com/KingIronMan2011/next-limitr/blob/main/CHANGELOG.md) for details.
           draft: false
           prerelease: false
