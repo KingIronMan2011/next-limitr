@@ -47,7 +47,6 @@
     "@eslint/js": "^9.39.2",
     "@types/node": "^25.1.0",
     "@types/react": "^19.2.10",
-    "@kingironman2011/next-limitr": "^1.0.0",
     "eslint": "^9.39.2",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.3.0",
