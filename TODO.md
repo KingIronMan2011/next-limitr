@@ -4,10 +4,8 @@
 
 - [x] Add storage adapter: MongoDB
 - [x] Add storage adapter: PostgreSQL
-- [ ] Add edge-compatible storage adapter (Upstash/Cloudflare KV)
-- [ ] Support Next.js Edge runtime (no native redis)
+- [x] Add edge-compatible storage adapter (Upstash/Cloudflare KV)
 - [x] Improve Redis backend: atomic Lua scripts for rate operations
-- [ ] Add alternative algorithms (token-bucket, leaky-bucket, sliding-window)
 - [ ] Expose selectable rate limit strategies in API
 - [ ] Implement hierarchical config: global defaults + per-route overrides
 

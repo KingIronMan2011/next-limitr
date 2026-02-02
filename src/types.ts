@@ -9,7 +9,18 @@ export enum RateLimitStrategy {
   TOKEN_BUCKET = "token_bucket",
 }
 
-export type StorageType = "memory" | "redis" | "mongodb" | "postgresql";
+export type StorageType = "memory" | "redis" | "mongodb" | "postgresql" | "edge";
+
+export type KVNamespaceLike = {
+  get(key: string, type?: "text"): Promise<string | null>;
+  put(
+    key: string,
+    value: string,
+    options?: { expiration?: number | Date; expirationTtl?: number }
+  ): Promise<void>;
+  delete(key: string): Promise<void>;
+  list?: (opts?: { prefix?: string; limit?: number }) => Promise<{ keys: { name: string }[] }>;
+};
 
 export interface RedisConfig {
   host: string;
@@ -36,6 +47,15 @@ export interface PostgresConfig {
   password?: string;
   database?: string;
   max?: number;
+}
+
+export interface UpstashConfig {
+  url: string; // e.g. https://us1-xxxxx.upstash.io
+  token?: string; // REST token (Bearer)
+}
+
+export interface CloudflareConfig {
+  kv: KVNamespaceLike;
 }
 
 export interface WebhookConfig {

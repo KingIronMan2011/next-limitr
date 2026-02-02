@@ -6,6 +6,7 @@ import { MemoryStorage } from "./storage/memory";
 import { RedisStorage } from "./storage/redis";
 import { MongoStorage } from "./storage/mongodb";
 import { PostgresStorage } from "./storage/postgresql";
+import { EdgeStorage } from "./storage/edge";
 import { WebhookHandler } from "./webhook";
 
 function getClientIp(req: NextRequest): string {
@@ -59,6 +60,13 @@ export function withRateLimit(options: RateLimitOptions = {}) {
     storage = new PostgresStorage(
       finalOptions.postgresClient || finalOptions.postgresConfig!,
     );
+  } else if (finalOptions.storage === "edge") {
+    // edge storage config is optional in types; accept any to avoid strict typing issues
+    const edgeCfg = (finalOptions as any).edgeConfig;
+    if (!edgeCfg) {
+      throw new Error("Edge storage configuration is required when using edge storage");
+    }
+    storage = new EdgeStorage(edgeCfg);
   } else {
     storage = new MemoryStorage();
   }
