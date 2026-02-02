@@ -4,6 +4,8 @@ import type { RateLimitOptions, StorageAdapter, NextApiHandler } from "./types";
 import { RateLimitStrategy } from "./types";
 import { MemoryStorage } from "./storage/memory";
 import { RedisStorage } from "./storage/redis";
+import { MongoStorage } from "./storage/mongodb";
+import { PostgresStorage } from "./storage/postgresql";
 import { WebhookHandler } from "./webhook";
 
 function getClientIp(req: NextRequest): string {
@@ -38,6 +40,24 @@ export function withRateLimit(options: RateLimitOptions = {}) {
     }
     storage = new RedisStorage(
       finalOptions.redisClient || finalOptions.redisConfig!,
+    );
+  } else if (finalOptions.storage === "mongodb") {
+    if (!finalOptions.mongoConfig && !finalOptions.mongoClient) {
+      throw new Error(
+        "MongoDB configuration or client is required when using mongodb storage",
+      );
+    }
+    storage = new MongoStorage(
+      finalOptions.mongoClient || finalOptions.mongoConfig!,
+    );
+  } else if (finalOptions.storage === "postgresql") {
+    if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
+      throw new Error(
+        "Postgres configuration or client is required when using postgresql storage",
+      );
+    }
+    storage = new PostgresStorage(
+      finalOptions.postgresClient || finalOptions.postgresConfig!,
     );
   } else {
     storage = new MemoryStorage();

@@ -2,12 +2,11 @@
 
 ## High priority
 
-- [ ] Add storage adapter: MongoDB
-- [ ] Add storage adapter: PostgreSQL
-- [ ] Add storage adapter: DynamoDB
+- [x] Add storage adapter: MongoDB
+- [x] Add storage adapter: PostgreSQL
 - [ ] Add edge-compatible storage adapter (Upstash/Cloudflare KV)
 - [ ] Support Next.js Edge runtime (no native redis)
-- [ ] Improve Redis backend: atomic Lua scripts for rate operations
+- [x] Improve Redis backend: atomic Lua scripts for rate operations
 - [ ] Add alternative algorithms (token-bucket, leaky-bucket, sliding-window)
 - [ ] Expose selectable rate limit strategies in API
 - [ ] Implement hierarchical config: global defaults + per-route overrides

@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import type { RedisClientType } from "redis";
+import type { MongoClient } from "mongodb";
+import type { Pool, Client } from "pg";
 
 export enum RateLimitStrategy {
   FIXED_WINDOW = "fixed-window",
@@ -7,7 +9,7 @@ export enum RateLimitStrategy {
   TOKEN_BUCKET = "token_bucket",
 }
 
-export type StorageType = "memory" | "redis";
+export type StorageType = "memory" | "redis" | "mongodb" | "postgresql";
 
 export interface RedisConfig {
   host: string;
@@ -15,6 +17,25 @@ export interface RedisConfig {
   password?: string;
   db?: number;
   tls?: boolean;
+}
+
+export interface MongoConfig {
+  uri?: string;
+  host?: string;
+  port?: number;
+  db?: string;
+  collection?: string;
+  options?: Record<string, unknown>;
+}
+
+export interface PostgresConfig {
+  connectionString?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  max?: number;
 }
 
 export interface WebhookConfig {
@@ -41,6 +62,10 @@ export interface RateLimitOptions {
   storage?: StorageType;
   redisConfig?: RedisConfig;
   redisClient?: RedisClientType;
+  mongoConfig?: MongoConfig;
+  mongoClient?: MongoClient;
+  postgresConfig?: PostgresConfig;
+  postgresClient?: Pool | Client;
 
   // Webhook and alert options
   webhook?: WebhookConfig;

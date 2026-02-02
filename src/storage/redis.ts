@@ -20,6 +20,28 @@ export class RedisStorage implements StorageAdapter {
   private readonly keyPrefix = "next-limitr:";
   private readonly ownsClient: boolean;
 
+  // Lua script for atomic increment + ensure TTL (returns [count, ttl_ms])
+  private readonly incrScript = `
+    local v = redis.call("INCR", KEYS[1])
+    local ttl = redis.call("PTTL", KEYS[1])
+    if ttl < 0 then
+      redis.call("PEXPIRE", KEYS[1], ARGV[1])
+      ttl = ARGV[1]
+    end
+    return {v, ttl}
+  `;
+
+  // Lua script for safe decrement (only decrement if > 0). returns new value or nil.
+  private readonly decrScript = `
+    local v = redis.call("GET", KEYS[1])
+    if not v then return nil end
+    local n = tonumber(v)
+    if n > 0 then
+      return redis.call("DECR", KEYS[1])
+    end
+    return n
+  `;
+
   constructor(config: RedisConfig | RedisClientType) {
     if (isRedisClient(config)) {
       this.client = config;
@@ -80,22 +102,20 @@ export class RedisStorage implements StorageAdapter {
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
     const redisKey = this.getKey(key);
 
-    // exec() returns a heterogeneous array — narrow it explicitly
-    const multiResult = (await this.client
-      .multi()
-      .incr(redisKey)
-      .pExpire(redisKey, windowMs)
-      .exec()) as unknown as ExecReply[] | null;
+    // Use atomic Lua script to INCR and ensure PEXPIRE is set
+    const evalResult = (await this.client.eval(this.incrScript, {
+      keys: [redisKey],
+      arguments: [String(windowMs)],
+    })) as unknown as ExecReply[] | null;
 
-    if (!multiResult || multiResult.length === 0) {
+    if (!evalResult || evalResult.length < 2) {
       throw new Error("Redis transaction failed: empty result");
     }
 
-    // First command is INCR -> extract numeric count
-    const count = this.extractNumberFromReply(multiResult[0]);
+    // First element is count, second is ttl in ms
+    const count = this.extractNumberFromReply(evalResult[0]);
+    const ttl = this.extractNumberFromReply(evalResult[1]);
 
-    // Read precise TTL in ms (-1 = no expire, -2 = missing)
-    const ttl = await this.client.pTTL(redisKey);
     const effectiveTtl = ttl > 0 ? ttl : windowMs;
     const reset = Math.floor((Date.now() + effectiveTtl) / 1000);
 
@@ -112,14 +132,12 @@ export class RedisStorage implements StorageAdapter {
 
   async decrement(key: string): Promise<void> {
     const redisKey = this.getKey(key);
-    const exists = (await this.client.exists(redisKey)) > 0;
-    if (!exists) return;
 
-    const value = await this.client.get(redisKey);
-    const num = value !== null ? Number(value) : 0;
-    if (Number.isFinite(num) && num > 0) {
-      await this.client.decr(redisKey);
-    }
+    // Atomic decrement only if value > 0
+    await this.client.eval(this.decrScript, {
+      keys: [redisKey],
+      arguments: [],
+    });
   }
 
   async reset(key: string): Promise<void> {
