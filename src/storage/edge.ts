@@ -1,6 +1,10 @@
-import { StorageAdapter, RateLimitUsage, KVNamespaceLike, UpstashConfig, CloudflareConfig } from "../types";
-
-export type EdgeConfig = { kind: "upstash"; upstash: UpstashConfig } | { kind: "cloudflare"; cf: CloudflareConfig };
+import {
+  StorageAdapter,
+  RateLimitUsage,
+  KVNamespaceLike,
+  UpstashConfig,
+  EdgeConfig,
+} from "../types";
 
 /**
  * EdgeStorage supports Upstash (REST Redis) and Cloudflare KV.
@@ -55,7 +59,9 @@ export class EdgeStorage implements StorageAdapter {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(this.upstash.token ? { Authorization: `Bearer ${this.upstash.token}` } : {}),
+        ...(this.upstash.token
+          ? { Authorization: `Bearer ${this.upstash.token}` }
+          : {}),
       },
       body: JSON.stringify(cmd),
     });
@@ -100,7 +106,17 @@ export class EdgeStorage implements StorageAdapter {
       const json = await this.upstashCommand(body);
       // Upstash REST responses vary; attempt to find returned array [count, ttl]
       // Common shapes: { result: [v, ttl] } or [v, ttl]
-      const result = (json as any)?.result ?? (json as any);
+      let result: unknown;
+      if (
+        json &&
+        typeof json === "object" &&
+        !Array.isArray(json) &&
+        "result" in (json as Record<string, unknown>)
+      ) {
+        result = (json as Record<string, unknown>)["result"];
+      } else {
+        result = json;
+      }
       const arr = Array.isArray(result) ? result : (result as unknown[]);
       if (!arr || arr.length < 2) throw new Error("Upstash increment failed");
       const count = this.extractNumber(arr[0]);

@@ -1,6 +1,11 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import type { RateLimitOptions, StorageAdapter, NextApiHandler } from "./types";
+import type {
+  RateLimitOptions,
+  StorageAdapter,
+  NextApiHandler,
+  EdgeConfig,
+} from "./types";
 import { RateLimitStrategy } from "./types";
 import { MemoryStorage } from "./storage/memory";
 import { RedisStorage } from "./storage/redis";
@@ -61,10 +66,14 @@ export function withRateLimit(options: RateLimitOptions = {}) {
       finalOptions.postgresClient || finalOptions.postgresConfig!,
     );
   } else if (finalOptions.storage === "edge") {
-    // edge storage config is optional in types; accept any to avoid strict typing issues
-    const edgeCfg = (finalOptions as any).edgeConfig;
+    // safely read optional edgeConfig without using `any`
+    const edgeCfg = (
+      finalOptions as RateLimitOptions & { edgeConfig?: EdgeConfig }
+    ).edgeConfig;
     if (!edgeCfg) {
-      throw new Error("Edge storage configuration is required when using edge storage");
+      throw new Error(
+        "Edge storage configuration is required when using edge storage",
+      );
     }
     storage = new EdgeStorage(edgeCfg);
   } else {
