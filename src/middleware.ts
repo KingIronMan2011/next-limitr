@@ -22,6 +22,70 @@ function getClientIp(req: NextRequest): string {
   );
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Deep merge helper: merges objects recursively, replaces arrays, overrides primitives.
+ */
+function deepMerge<T = unknown>(target?: Partial<T>, source?: Partial<T>): T {
+  if (target === undefined) return (source as T) ?? ({} as T);
+  if (source === undefined) return target as T;
+
+  if (Array.isArray(source)) {
+    // arrays are replaced
+    return source as unknown as T;
+  }
+
+  if (!isPlainObject(target) || !isPlainObject(source)) {
+    return source as T;
+  }
+
+  const out: Record<string, unknown> = {
+    ...(target as Record<string, unknown>),
+  };
+  const src = source as Record<string, unknown>;
+  const tgt = target as Record<string, unknown>;
+
+  for (const key of Object.keys(src)) {
+    const s = src[key];
+    const t = tgt[key];
+    if (Array.isArray(s)) {
+      out[key] = s;
+    } else if (isPlainObject(s) && isPlainObject(t)) {
+      out[key] = deepMerge(t as Partial<T>, s as Partial<T>);
+    } else {
+      out[key] = s;
+    }
+  }
+  return out as unknown as T;
+}
+
+/**
+ * Simple route matcher supporting:
+ * - exact paths ("/api/foo")
+ * - wildcard "*" for global override
+ * - prefix wildcard like "/api/users/*"
+ */
+function findRouteOverride(
+  map: Record<string, Partial<RateLimitOptions>> | undefined,
+  pathname: string,
+): Partial<RateLimitOptions> | undefined {
+  if (!map) return undefined;
+  // exact match
+  if (Object.prototype.hasOwnProperty.call(map, pathname)) return map[pathname];
+  // prefix wildcard matches (keys ending with "/*")
+  for (const key of Object.keys(map)) {
+    if (key === "*") return map[key];
+    if (key.endsWith("/*")) {
+      const prefix = key.slice(0, -1); // keep trailing slash
+      if (pathname.startsWith(prefix)) return map[key];
+    }
+  }
+  return undefined;
+}
+
 const DEFAULT_OPTIONS: Partial<RateLimitOptions> = {
   limit: 100,
   windowMs: 60 * 1000, // 1 minute
@@ -30,65 +94,81 @@ const DEFAULT_OPTIONS: Partial<RateLimitOptions> = {
 };
 
 export function withRateLimit(options: RateLimitOptions = {}) {
-  const finalOptions: RateLimitOptions = {
-    ...(DEFAULT_OPTIONS as RateLimitOptions),
-    ...options,
-  };
-  let storage: StorageAdapter;
-  let webhookHandler: WebhookHandler | undefined;
-
-  // Initialize storage
-  if (finalOptions.storage === "redis") {
-    if (!finalOptions.redisConfig && !finalOptions.redisClient) {
-      throw new Error(
-        "Redis configuration or client is required when using redis storage",
-      );
-    }
-    storage = new RedisStorage(
-      finalOptions.redisClient || finalOptions.redisConfig!,
-    );
-  } else if (finalOptions.storage === "mongodb") {
-    if (!finalOptions.mongoConfig && !finalOptions.mongoClient) {
-      throw new Error(
-        "MongoDB configuration or client is required when using mongodb storage",
-      );
-    }
-    storage = new MongoStorage(
-      finalOptions.mongoClient || finalOptions.mongoConfig!,
-    );
-  } else if (finalOptions.storage === "postgresql") {
-    if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
-      throw new Error(
-        "Postgres configuration or client is required when using postgresql storage",
-      );
-    }
-    storage = new PostgresStorage(
-      finalOptions.postgresClient || finalOptions.postgresConfig!,
-    );
-  } else if (finalOptions.storage === "edge") {
-    // safely read optional edgeConfig without using `any`
-    const edgeCfg = (
-      finalOptions as RateLimitOptions & { edgeConfig?: EdgeConfig }
-    ).edgeConfig;
-    if (!edgeCfg) {
-      throw new Error(
-        "Edge storage configuration is required when using edge storage",
-      );
-    }
-    storage = new EdgeStorage(edgeCfg);
-  } else {
-    storage = new MemoryStorage();
-  }
-
-  // Initialize webhook handler
-  if (finalOptions.webhook) {
-    webhookHandler = new WebhookHandler(finalOptions.webhook);
-  }
+  // Apply defaults (deep merge to allow nested defaults)
+  const globalOptions = deepMerge<RateLimitOptions>(
+    DEFAULT_OPTIONS as Partial<RateLimitOptions>,
+    options,
+  );
 
   return function rateLimit(handler: NextApiHandler): NextApiHandler {
     return async function rateLimitedHandler(
       req: NextRequest,
     ): Promise<NextResponse> {
+      // Determine per-route override and merge with globals
+      const routeOverrides = (
+        globalOptions as Partial<RateLimitOptions> & {
+          routes?: Record<string, Partial<RateLimitOptions>>;
+        }
+      ).routes;
+      const matchedOverride = findRouteOverride(
+        routeOverrides,
+        req.nextUrl.pathname,
+      );
+      const finalOptions = deepMerge<RateLimitOptions>(
+        globalOptions as Partial<RateLimitOptions>,
+        matchedOverride,
+      );
+
+      let storage: StorageAdapter;
+      let webhookHandler: WebhookHandler | undefined;
+
+      // Initialize storage for this (possibly overridden) config
+      if (finalOptions.storage === "redis") {
+        if (!finalOptions.redisConfig && !finalOptions.redisClient) {
+          throw new Error(
+            "Redis configuration or client is required when using redis storage",
+          );
+        }
+        storage = new RedisStorage(
+          finalOptions.redisClient || finalOptions.redisConfig!,
+        );
+      } else if (finalOptions.storage === "mongodb") {
+        if (!finalOptions.mongoConfig && !finalOptions.mongoClient) {
+          throw new Error(
+            "MongoDB configuration or client is required when using mongodb storage",
+          );
+        }
+        storage = new MongoStorage(
+          finalOptions.mongoClient || finalOptions.mongoConfig!,
+        );
+      } else if (finalOptions.storage === "postgresql") {
+        if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
+          throw new Error(
+            "Postgres configuration or client is required when using postgresql storage",
+          );
+        }
+        storage = new PostgresStorage(
+          finalOptions.postgresClient || finalOptions.postgresConfig!,
+        );
+      } else if (finalOptions.storage === "edge") {
+        const edgeCfg = (
+          finalOptions as RateLimitOptions & { edgeConfig?: EdgeConfig }
+        ).edgeConfig;
+        if (!edgeCfg) {
+          throw new Error(
+            "Edge storage configuration is required when using edge storage",
+          );
+        }
+        storage = new EdgeStorage(edgeCfg);
+      } else {
+        storage = new MemoryStorage();
+      }
+
+      // Initialize webhook handler if configured for this route
+      if (finalOptions.webhook) {
+        webhookHandler = new WebhookHandler(finalOptions.webhook);
+      }
+
       // Check if we should skip rate limiting
       if (finalOptions.skip && (await finalOptions.skip(req))) {
         return handler(req) as Promise<NextResponse>;

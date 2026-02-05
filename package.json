@@ -1,7 +1,7 @@
 {
   "name": "@kingironman2011/next-limitr",
   "type": "module",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "KingIronMan2011",
   "description": "A powerful rate limiting middleware for Next.js APIs with built-in webhook support and customizable alerts",
   "license": "MIT",

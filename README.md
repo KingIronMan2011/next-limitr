@@ -1,24 +1,26 @@
-# next-limitr
+# @kingironman2011/next-limitr
 
 **This is a fork of the [next-limitr](https://www.npmjs.com/package/next-limitr) package**
 
 A powerful and flexible rate limiting middleware for Next.js API routes, featuring built-in Redis support, webhook notifications, and customizable alerts.
 
-[![npm version](https://badge.fury.io/js/@kingironman2011/next-limitr.svg)](https://badge.fury.io/js/@kingironman2011/next-limitr)
+[![npm version](https://badge.fury.io/js/@kingironman2011%2Fnext-limitr.svg)](https://badge.fury.io/js/@kingironman2011%2Fnext-limitr)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/KingIronMan2011/next-limitr/actions/workflows/ci.yml/badge.svg)](https://github.com/KingIronMan2011/next-limitr/actions/workflows/ci.yml)
 [![Publish](https://github.com/KingIronMan2011/next-limitr/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/KingIronMan2011/next-limitr/actions/workflows/npm-publish.yml)
 
-## Features
+## Overview
 
-- **Robust Rate Limiting**: Protect your Next.js API routes with configurable rate limits
-- **Multiple Storage Options**: Choose between in-memory and Redis storage
-- **Dynamic Rate Limits**: Set different limits based on user type, IP, or custom conditions
-- **Webhook Support**: Get notified when rate limits are exceeded
-- **Customizable Responses**: Define custom responses for rate-limited requests
-- **Detailed Headers**: Standard rate limit headers for client-side tracking
-- **TypeScript Support**: Full type safety and autocompletion
-- **High Performance**: Optimized for minimal overhead
+`@kingironman2011/next-limitr` provides a minimal, configurable middleware for protecting Next.js API endpoints with rate limits. It supports multiple storage backends, dynamic limits, per-route overrides, and webhook notifications when limits are exceeded.
+
+Key capabilities:
+
+- Global defaults with hierarchical per-route overrides
+- Multiple storage backends (in-memory, Redis, MongoDB, PostgreSQL, edge KV)
+- Dynamic and programmatic limits (per-request)
+- Webhook notifications and custom handlers
+- Standard rate-limit response headers
+- TypeScript-first API
 
 ## Installation
 
@@ -46,80 +48,38 @@ export const GET = withRateLimit({
 });
 ```
 
-### Advanced Usage with Redis and Custom Alerts
+### Per-route overrides (hierarchical config)
+
+You can provide global defaults and a routes map to override settings for specific endpoints or prefixes. Nested objects are merged recursively; arrays in overrides replace arrays in the global config.
 
 ```typescript
-import { withRateLimit, RateLimitStrategy } from "@kingironman2011/next-limitr";
-import { Redis } from "ioredis";
+import { withRateLimit } from "@kingironman2011/next-limitr";
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: parseInt(process.env.REDIS_PORT || "6379"),
-  password: process.env.REDIS_PASSWORD,
-});
-
-export const POST = withRateLimit({
-  // Storage configuration
+export const handler = withRateLimit({
+  limit: 100,
+  windowMs: 60000,
   storage: "redis",
-  redisClient: redis,
-
-  // Rate limiting settings
-  limit: 50,
-  windowMs: 300000, // 5 minutes
-  strategy: RateLimitStrategy.SLIDING_WINDOW,
-
-  // Custom key generation
-  keyGenerator: (req) => {
-    const userId = req.headers.get("X-User-ID");
-    return userId ? `user-${userId}` : req.ip;
-  },
-
-  // Dynamic limits
-  getLimitForRequest: async (req) => {
-    const userType = req.headers.get("X-User-Type");
-    switch (userType) {
-      case "premium":
-        return 1000;
-      case "standard":
-        return 100;
-      default:
-        return 50;
-    }
-  },
-
-  // Webhook notifications
-  webhook: {
-    url: process.env.WEBHOOK_URL,
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.WEBHOOK_TOKEN}`,
+  redisClient: redisInstance,
+  routes: {
+    "/api/admin/*": {
+      limit: 20,
+      storage: "memory",
+    },
+    "/api/public": {
+      limit: 1000,
+      skip: (req) => req.headers.get("x-internal") === "1",
     },
   },
-
-  // Custom alert handler
-  onLimitReached: async (req, usage) => {
-    console.error(`Rate limit exceeded for ${req.ip}`);
-  },
-
-  // Custom response
-  handler: (req, usage) => {
-    return NextResponse.json(
-      {
-        error: "Rate limit exceeded",
-        retryAfter: usage.reset - Math.floor(Date.now() / 1000),
-        usage: {
-          limit: usage.limit,
-          remaining: usage.remaining,
-          reset: new Date(usage.reset * 1000).toISOString(),
-        },
-      },
-      { status: 429 },
-    );
-  },
-})((request: NextRequest) => {
-  return NextResponse.json({ success: true });
+})((req) => {
+  /* ... */
 });
 ```
+
+In this example:
+
+- Requests to /api/admin/\* use memory storage and a lower limit.
+- /api/public uses a large limit and can be skipped conditionally.
+- Any fields omitted in a route override inherit from the global options.
 
 ## Configuration Options
 
@@ -133,29 +93,31 @@ export const POST = withRateLimit({
 
 ### Storage Options
 
-| Option        | Type                  | Default    | Description                                   |
-| ------------- | --------------------- | ---------- | --------------------------------------------- |
-| `storage`     | `"memory" \| "redis"` | `"memory"` | Storage backend to use                        |
-| `redisConfig` | `RedisConfig`         | -          | Redis configuration (required if using Redis) |
-| `redisClient` | `Redis`               | -          | Existing Redis client instance                |
+| Option           | Type                                                         | Default    | Description                                   |
+| ---------------- | ------------------------------------------------------------ | ---------- | --------------------------------------------- |
+| `storage`        | `"memory" \| "redis" \| "mongodb" \| "postgresql" \| "edge"` | `"memory"` | Storage backend to use                        |
+| `redisConfig`    | `RedisConfig`                                                | -          | Redis configuration (required if using Redis) |
+| `redisClient`    | `Redis`                                                      | -          | Existing Redis client instance                |
+| `mongoConfig`    | `MongoConfig`                                                | -          | MongoDB configuration or client               |
+| `postgresConfig` | `PostgresConfig`                                             | -          | PostgreSQL configuration or client            |
+| `edgeConfig`     | `EdgeConfig`                                                 | -          | Edge KV configuration (for edge storage)      |
 
 ### Advanced Options
 
-| Option               | Type                                                                                 | Description                    |
-| -------------------- | ------------------------------------------------------------------------------------ | ------------------------------ |
-| `keyGenerator`       | `(req: NextRequest) => string`                                                       | Custom key generation function |
-| `getLimitForRequest` | `(req: NextRequest) => Promise<number> \| number`                                    | Dynamic limit function         |
-| `skip`               | `(req: NextRequest) => Promise<boolean> \| boolean`                                  | Skip rate limiting condition   |
-| `handler`            | `(req: NextRequest, usage: RateLimitUsage) => Promise<NextResponse> \| NextResponse` | Custom rate limit response     |
+| Option               | Type                                                                                 | Description                      |
+| -------------------- | ------------------------------------------------------------------------------------ | -------------------------------- |
+| `keyGenerator`       | `(req: NextRequest) => string`                                                       | Custom key generation function   |
+| `getLimitForRequest` | `(req: NextRequest) => Promise<number> \| number`                                    | Dynamic limit function           |
+| `skip`               | `(req: NextRequest) => Promise<boolean> \| boolean`                                  | Skip rate limiting condition     |
+| `handler`            | `(req: NextRequest, usage: RateLimitUsage) => Promise<NextResponse> \| NextResponse` | Custom rate limit response       |
+| `webhook`            | `WebhookOptions`                                                                     | Webhook configuration for alerts |
 
-### Webhook Options
+Notes on hierarchical merging:
 
-| Option            | Type                                               | Description             |
-| ----------------- | -------------------------------------------------- | ----------------------- |
-| `webhook.url`     | `string`                                           | Webhook URL             |
-| `webhook.method`  | `string`                                           | HTTP method for webhook |
-| `webhook.headers` | `Record<string, string>`                           | Custom webhook headers  |
-| `webhook.payload` | `(req: NextRequest, usage: RateLimitUsage) => any` | Custom webhook payload  |
+- Objects are merged recursively from global -> route override.
+- Arrays in route overrides replace arrays from globals.
+- Primitive values in overrides replace global primitives.
+- Route patterns support exact paths, prefix wildcards ("/api/foo/_"), and a global "_" key.
 
 ## Response Headers
 
@@ -168,43 +130,23 @@ The middleware adds standard rate limit headers to responses:
 
 ## Best Practices
 
-1. **Choose the Right Storage**:
-   - Use `memory` storage for simple applications or development
-   - Use `redis` storage for production or distributed systems
-
-2. **Set Appropriate Limits**:
-   - Consider your API's capacity and user needs
-   - Use dynamic limits for different user tiers
-   - Set reasonable window sizes
-
-3. **Handle Rate Limits Gracefully**:
-   - Provide clear error messages
-   - Include retry-after information
-   - Log or monitor rate limit events
-
-4. **Security Considerations**:
-   - Use secure key generation
-   - Protect webhook endpoints
-   - Validate user identifiers
+1. Choose the right storage:
+   - Use `memory` for development or single-instance deployments.
+   - Use `redis` (or another persistent adapter) for production and distributed systems.
+2. Configure per-route overrides for high-value or sensitive endpoints.
+3. Use `getLimitForRequest` to implement tiered quotas (e.g., premium vs free users).
+4. Attach monitoring or webhook handlers to receive alerts on rate limit events.
 
 ## Contributing
 
-Contributions are welcome! Please read our [contributing guidelines](CONTRIBUTING.md) for details.
+Contributions are welcome. Please follow repository guidelines and open issues or pull requests for improvements.
 
 ## Continuous Integration
 
-This project uses GitHub Actions for continuous integration and deployment:
+This project uses GitHub Actions for CI and publishing:
 
-- **CI Workflow**: Automatically runs on every push and pull request to ensure code quality
-  - Prettier formatting check
-  - ESLint linting
-  - Test suite
-  - Build verification
-
-- **Publish Workflow**: Automatically publishes new versions to npm and GitHub Packages
-  - Checks for existing versions to prevent duplicate releases
-  - Creates Git tags and GitHub releases
-  - Uses npm provenance for enhanced security
+- Formatting, linting, tests, and build verification run on pushes and PRs.
+- Publish workflow releases packages to npm and GitHub Packages.
 
 ## License
 
@@ -218,4 +160,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-Built with ❤️ for the Next.js community
+Built with ♥️ for the Next.js community

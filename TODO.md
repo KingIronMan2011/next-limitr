@@ -6,8 +6,7 @@
 - [x] Add storage adapter: PostgreSQL
 - [x] Add edge-compatible storage adapter (Upstash/Cloudflare KV)
 - [x] Improve Redis backend: atomic Lua scripts for rate operations
-- [ ] Expose selectable rate limit strategies in API
-- [ ] Implement hierarchical config: global defaults + per-route overrides
+- [x] Implement hierarchical config: global defaults + per-route overrides
 
 ## Medium priority
 
