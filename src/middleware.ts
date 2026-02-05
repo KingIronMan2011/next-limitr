@@ -11,6 +11,7 @@ import { MemoryStorage } from "./storage/memory";
 import { RedisStorage } from "./storage/redis";
 import { MongoStorage } from "./storage/mongodb";
 import { PostgresStorage } from "./storage/postgresql";
+import { DrizzlePostgresStorage } from "./storage/drizzle-postgres";
 import { EdgeStorage } from "./storage/edge";
 import { WebhookHandler } from "./webhook";
 
@@ -142,14 +143,21 @@ export function withRateLimit(options: RateLimitOptions = {}) {
           finalOptions.mongoClient || finalOptions.mongoConfig!,
         );
       } else if (finalOptions.storage === "postgresql") {
-        if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
-          throw new Error(
-            "Postgres configuration or client is required when using postgresql storage",
+        // Check if user wants Drizzle or raw pg
+        if (finalOptions.drizzlePostgresConfig || finalOptions.drizzlePostgresDb) {
+          storage = new DrizzlePostgresStorage(
+            finalOptions.drizzlePostgresDb || finalOptions.drizzlePostgresConfig!,
+          );
+        } else {
+          if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
+            throw new Error(
+              "Postgres configuration or client is required when using postgresql storage",
+            );
+          }
+          storage = new PostgresStorage(
+            finalOptions.postgresClient || finalOptions.postgresConfig!,
           );
         }
-        storage = new PostgresStorage(
-          finalOptions.postgresClient || finalOptions.postgresConfig!,
-        );
       } else if (finalOptions.storage === "edge") {
         const edgeCfg = (
           finalOptions as RateLimitOptions & { edgeConfig?: EdgeConfig }

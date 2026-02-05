@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import type { RedisClientType } from "redis";
 import type { MongoClient } from "mongodb";
 import type { Pool, Client } from "pg";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 
 export enum RateLimitStrategy {
   FIXED_WINDOW = "fixed-window",
@@ -57,6 +58,27 @@ export interface PostgresConfig {
   max?: number;
 }
 
+export interface DrizzlePostgresConfig {
+  // Option 1: Pass an existing Drizzle database instance (recommended for existing schemas)
+  db?: NodePgDatabase;
+  
+  // Option 2: Pass existing pg Pool/Client (will be wrapped with Drizzle)
+  pool?: Pool;
+  client?: Client;
+  
+  // Option 3: Provide connection details (will create new Pool + Drizzle instance)
+  connectionString?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  max?: number;
+  
+  // Whether to automatically create the rate_limits table (default: true if creating new connection, false if using existing db)
+  autoCreateTable?: boolean;
+}
+
 export interface UpstashConfig {
   url: string; // e.g. https://us1-xxxxx.upstash.io
   token?: string; // REST token (Bearer)
@@ -98,6 +120,8 @@ export interface RateLimitOptions {
   mongoClient?: MongoClient;
   postgresConfig?: PostgresConfig;
   postgresClient?: Pool | Client;
+  drizzlePostgresConfig?: DrizzlePostgresConfig;
+  drizzlePostgresDb?: NodePgDatabase;
 
   // Webhook and alert options
   webhook?: WebhookConfig;
