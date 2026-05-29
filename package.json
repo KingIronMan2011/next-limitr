@@ -2,6 +2,7 @@
   "name": "@kingironman2011/next-limitr",
   "version": "1.1.5",
   "author": "KingIronMan2011",
+  "type": "module",
   "description": "A powerful rate limiting middleware for Next.js APIs with built-in webhook support and customizable alerts",
   "license": "MIT",
   "keywords": [
@@ -30,7 +31,7 @@
     }
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsc",
@@ -47,21 +48,20 @@
     "axios": "^1.13.4",
     "mongodb": "^7.1.0",
     "pg": "^8.18.0",
-    "redis": "^5.10.0"
+    "redis": "^6.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.2.1",
     "@types/pg": "^8.16.0",
     "@types/react": "^19.2.13",
-    "eslint": "^9.39.2",
-    "eslint-plugin-react": "^7.37.5",
+    "eslint": "^10.4.0",
     "globals": "^17.3.0",
     "jiti": "^2.6.1",
     "next": "^16.1.6",
     "prettier": "^3.8.1",
     "rimraf": "^6.1.2",
-    "typescript": "^5.8.3",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.18"
   },

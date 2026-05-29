@@ -79,7 +79,7 @@ export class MongoStorage implements StorageAdapter {
     // normalize result: driver typings may return the doc directly or a wrapper with `.value`
     type DocType = { _id: string; count: number; expireAt?: Date } | null;
     const resObj = res as unknown;
-    let doc: DocType = null;
+    let doc: DocType;
 
     if (
       resObj &&

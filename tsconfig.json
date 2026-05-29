@@ -1,14 +1,15 @@
 {
   "compilerOptions": {
-    "target": "es2022",
-    "module": "commonjs",
+    "target": "esnext",
+    "module": "esnext",
     "declaration": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
