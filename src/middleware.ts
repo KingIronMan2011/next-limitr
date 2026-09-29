@@ -1,30 +1,24 @@
-import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server.js";
+import { NextResponse } from "next/server.js";
 import type {
   RateLimitOptions,
   StorageAdapter,
   NextApiHandler,
-  EdgeConfig,
-} from "./types";
-import { RateLimitStrategy } from "./types";
-import { MemoryStorage } from "./storage/memory";
-import { RedisStorage } from "./storage/redis";
-import { IORedisStorage } from "./storage/ioredis";
-import { MongoStorage } from "./storage/mongodb";
-import { PostgresStorage } from "./storage/postgresql";
-import { EdgeStorage } from "./storage/edge";
-import { WebhookHandler } from "./webhook";
-
-function getClientIp(req: NextRequest): string {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return (
-    req.headers.get("x-real-ip") || req.headers.get("x-client-ip") || "unknown"
-  );
-}
+} from "./types.js";
+import { RateLimitStrategy } from "./types.js";
+import { MemoryStorage } from "./storage/memory.js";
+import { RedisStorage } from "./storage/redis.js";
+import { IORedisStorage } from "./storage/ioredis.js";
+import { MongoStorage } from "./storage/mongodb.js";
+import { PostgresStorage } from "./storage/postgresql.js";
+import { EdgeStorage } from "./storage/edge.js";
+import { WebhookHandler } from "./webhook.js";
+import { getClientIp } from "./request.js";
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
+  if (typeof v !== "object" || v === null) return false;
+  const prototype: unknown = Object.getPrototypeOf(v);
+  return prototype === Object.prototype || prototype === null;
 }
 
 /**
@@ -76,15 +70,19 @@ function findRouteOverride(
   if (!map) return undefined;
   // exact match
   if (Object.prototype.hasOwnProperty.call(map, pathname)) return map[pathname];
-  // prefix wildcard matches (keys ending with "/*")
+  // The most specific prefix wins regardless of insertion order.
+  let bestMatch: Partial<RateLimitOptions> | undefined;
+  let bestLength = 0;
   for (const key of Object.keys(map)) {
-    if (key === "*") return map[key];
     if (key.endsWith("/*")) {
       const prefix = key.slice(0, -1); // keep trailing slash
-      if (pathname.startsWith(prefix)) return map[key];
+      if (pathname.startsWith(prefix) && prefix.length > bestLength) {
+        bestMatch = map[key];
+        bestLength = prefix.length;
+      }
     }
   }
-  return undefined;
+  return bestMatch ?? map["*"];
 }
 
 const DEFAULT_OPTIONS: Partial<RateLimitOptions> = {
@@ -102,82 +100,89 @@ export function withRateLimit(options: RateLimitOptions = {}) {
   );
 
   return function rateLimit(handler: NextApiHandler): NextApiHandler {
-    return async function rateLimitedHandler(
-      req: NextRequest,
-    ): Promise<NextResponse> {
-      // Determine per-route override and merge with globals
-      const routeOverrides = (
-        globalOptions as Partial<RateLimitOptions> & {
-          routes?: Record<string, Partial<RateLimitOptions>>;
-        }
-      ).routes;
-      const matchedOverride = findRouteOverride(
-        routeOverrides,
-        req.nextUrl.pathname,
-      );
-      const finalOptions = deepMerge<RateLimitOptions>(
-        globalOptions as Partial<RateLimitOptions>,
-        matchedOverride,
-      );
+    type RouteRuntime = {
+      options: RateLimitOptions;
+      storage: StorageAdapter;
+      webhookHandler?: WebhookHandler;
+    };
+    const runtimes = new Map<
+      Partial<RateLimitOptions> | undefined,
+      RouteRuntime
+    >();
 
+    function getRuntime(override?: Partial<RateLimitOptions>): RouteRuntime {
+      const cached = runtimes.get(override);
+      if (cached) return cached;
+
+      const finalOptions = deepMerge<RateLimitOptions>(globalOptions, override);
       let storage: StorageAdapter;
-      let webhookHandler: WebhookHandler | undefined;
-
-      // Initialize storage for this (possibly overridden) config
       if (finalOptions.storage === "redis") {
-        if (!finalOptions.redisConfig && !finalOptions.redisClient) {
+        const config = finalOptions.redisClient ?? finalOptions.redisConfig;
+        if (!config) {
           throw new Error(
             "Redis configuration or client is required when using redis storage",
           );
         }
-        storage = new RedisStorage(
-          finalOptions.redisClient || finalOptions.redisConfig!,
-        );
+        storage = new RedisStorage(config);
       } else if (finalOptions.storage === "ioredis") {
-        if (!finalOptions.ioredisConfig && !finalOptions.ioredisClient) {
+        const config = finalOptions.ioredisClient ?? finalOptions.ioredisConfig;
+        if (!config) {
           throw new Error(
             "ioredis configuration or client is required when using ioredis storage",
           );
         }
-        storage = new IORedisStorage(
-          finalOptions.ioredisClient || finalOptions.ioredisConfig!,
-        );
+        storage = new IORedisStorage(config);
       } else if (finalOptions.storage === "mongodb") {
-        if (!finalOptions.mongoConfig && !finalOptions.mongoClient) {
+        const config = finalOptions.mongoClient ?? finalOptions.mongoConfig;
+        if (!config) {
           throw new Error(
             "MongoDB configuration or client is required when using mongodb storage",
           );
         }
-        storage = new MongoStorage(
-          finalOptions.mongoClient || finalOptions.mongoConfig!,
-        );
+        storage = new MongoStorage(config);
       } else if (finalOptions.storage === "postgresql") {
-        if (!finalOptions.postgresConfig && !finalOptions.postgresClient) {
+        const config =
+          finalOptions.postgresClient ?? finalOptions.postgresConfig;
+        if (!config) {
           throw new Error(
             "Postgres configuration or client is required when using postgresql storage",
           );
         }
-        storage = new PostgresStorage(
-          finalOptions.postgresClient || finalOptions.postgresConfig!,
-        );
+        storage = new PostgresStorage(config);
       } else if (finalOptions.storage === "edge") {
-        const edgeCfg = (
-          finalOptions as RateLimitOptions & { edgeConfig?: EdgeConfig }
-        ).edgeConfig;
-        if (!edgeCfg) {
+        if (!finalOptions.edgeConfig) {
           throw new Error(
             "Edge storage configuration is required when using edge storage",
           );
         }
-        storage = new EdgeStorage(edgeCfg);
+        storage = new EdgeStorage(finalOptions.edgeConfig);
       } else {
         storage = new MemoryStorage();
       }
 
-      // Initialize webhook handler if configured for this route
-      if (finalOptions.webhook) {
-        webhookHandler = new WebhookHandler(finalOptions.webhook);
-      }
+      const runtime = {
+        options: finalOptions,
+        storage,
+        webhookHandler: finalOptions.webhook
+          ? new WebhookHandler(finalOptions.webhook)
+          : undefined,
+      };
+      runtimes.set(override, runtime);
+      return runtime;
+    }
+
+    return async function rateLimitedHandler(
+      req: NextRequest,
+    ): Promise<NextResponse> {
+      const matchedOverride = findRouteOverride(
+        globalOptions.routes,
+        req.nextUrl.pathname,
+      );
+      const {
+        options: finalOptions,
+        storage,
+        webhookHandler,
+      } = getRuntime(matchedOverride);
 
       // Check if we should skip rate limiting
       if (finalOptions.skip && (await finalOptions.skip(req))) {
@@ -196,64 +201,63 @@ export function withRateLimit(options: RateLimitOptions = {}) {
 
       const windowMs = finalOptions.windowMs!;
 
+      let usage;
       try {
-        // Increment usage from storage
-        const usage = await storage.increment(key, windowMs);
-
-        const headers: Record<string, string> = {
-          "X-RateLimit-Limit": String(limit),
-          "X-RateLimit-Remaining": String(Math.max(0, limit - usage.used)),
-          "X-RateLimit-Reset": String(usage.reset),
-        };
-
-        // If limit is exceeded
-        if (usage.used > limit) {
-          const retryAfterSec = Math.max(
-            0,
-            Math.ceil((usage.reset * 1000 - Date.now()) / 1000),
-          );
-          headers["Retry-After"] = String(retryAfterSec);
-
-          if (webhookHandler) {
-            await webhookHandler.notify(req, { ...usage, limit });
-          }
-
-          // Call custom onLimitReached handler if provided
-          if (finalOptions.onLimitReached) {
-            await finalOptions.onLimitReached(req, { ...usage, limit });
-          }
-
-          // Use custom handler or default response
-          if (finalOptions.handler) {
-            return (await finalOptions.handler(req, {
-              ...usage,
-              limit,
-            })) as NextResponse;
-          }
-
-          return NextResponse.json(
-            { error: "Too Many Requests" },
-            {
-              status: 429,
-              headers,
-            },
-          );
-        }
-
-        // Call original handler
-        const response = (await Promise.resolve(handler(req))) as NextResponse;
-
-        // Attach rate limit headers
-        Object.entries(headers).forEach(([k, v]) => {
-          response.headers.set(k, v);
-        });
-
-        return response;
+        usage = await storage.increment(key, windowMs);
       } catch (error: unknown) {
         console.error("Rate limiting error:", error);
-        // On storage or other errors, allow the request
-        return handler(req) as Promise<NextResponse>;
+        return (await handler(req)) as NextResponse;
       }
+
+      const headers: Record<string, string> = {
+        "X-RateLimit-Limit": String(limit),
+        "X-RateLimit-Remaining": String(Math.max(0, limit - usage.used)),
+        "X-RateLimit-Reset": String(usage.reset),
+      };
+
+      // If limit is exceeded
+      if (usage.used > limit) {
+        const retryAfterSec = Math.max(
+          0,
+          Math.ceil((usage.reset * 1000 - Date.now()) / 1000),
+        );
+        headers["Retry-After"] = String(retryAfterSec);
+
+        if (webhookHandler) {
+          await webhookHandler.notify(req, { ...usage, limit });
+        }
+
+        // Call custom onLimitReached handler if provided
+        if (finalOptions.onLimitReached) {
+          await finalOptions.onLimitReached(req, { ...usage, limit });
+        }
+
+        // Use custom handler or default response
+        if (finalOptions.handler) {
+          return (await finalOptions.handler(req, {
+            ...usage,
+            limit,
+          })) as NextResponse;
+        }
+
+        return NextResponse.json(
+          { error: "Too Many Requests" },
+          {
+            status: 429,
+            headers,
+          },
+        );
+      }
+
+      // Call original handler
+      const response = (await Promise.resolve(handler(req))) as NextResponse;
+
+      // Attach rate limit headers
+      Object.entries(headers).forEach(([k, v]) => {
+        response.headers.set(k, v);
+      });
+
+      return response;
     };
   };
 }

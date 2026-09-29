@@ -31,6 +31,7 @@ describe("MongoStorage (integration or mock)", () => {
     // Lightweight in-memory mock MongoClient/Collection to exercise MongoStorage logic.
     class MockCollection {
       private store = new Map<string, { count: number; expireAt: number }>();
+      indexCreations = 0;
 
       async findOneAndUpdate(
         filter: unknown,
@@ -40,17 +41,18 @@ describe("MongoStorage (integration or mock)", () => {
         void _opts;
         const id = (filter as { _id?: string })._id as string;
         const now = Date.now();
-        const upd = update as Record<string, unknown> | null;
-        const setOnInsert =
-          (upd?.["$setOnInsert"] as Record<string, unknown> | undefined) ??
-          undefined;
-        const expireAtParam =
-          (setOnInsert?.["expireAt"] as Date | undefined) ??
-          new Date(now + 2000);
-        const expireAtMs = expireAtParam.getTime();
+        expect(Array.isArray(update)).toBe(true);
+        const stage = (update as { $set: Record<string, unknown> }[])[0];
+        expect(stage.$set.count).toHaveProperty("$cond");
+        expect(stage.$set.expireAt).toHaveProperty("$cond");
         const existing = this.store.get(id);
-        if (!existing || existing.expireAt < now) {
-          this.store.set(id, { count: 1, expireAt: expireAtMs });
+        if (!existing || existing.expireAt <= now) {
+          const dateAdd = (
+            stage.$set.expireAt as {
+              $cond: [unknown, { $dateAdd: { amount: number } }, unknown];
+            }
+          ).$cond[1].$dateAdd;
+          this.store.set(id, { count: 1, expireAt: now + dateAdd.amount });
         } else {
           existing.count += 1;
         }
@@ -62,6 +64,11 @@ describe("MongoStorage (integration or mock)", () => {
             expireAt: new Date(doc.expireAt),
           },
         };
+      }
+
+      expire(id: string) {
+        const doc = this.store.get(id);
+        if (doc) doc.expireAt = Date.now() - 1;
       }
 
       async updateOne(filter: unknown, _update?: unknown) {
@@ -83,6 +90,7 @@ describe("MongoStorage (integration or mock)", () => {
       }
 
       async createIndex(_spec?: unknown, _opts?: unknown) {
+        this.indexCreations += 1;
         void _spec;
         void _opts;
         return "ok";
@@ -112,6 +120,12 @@ describe("MongoStorage (integration or mock)", () => {
         void _name;
         return this.coll;
       }
+      get indexCreations() {
+        return this.coll.indexCreations;
+      }
+      expire(id: string) {
+        this.coll.expire(id);
+      }
     }
 
     class MockClient {
@@ -121,6 +135,12 @@ describe("MongoStorage (integration or mock)", () => {
       db(_name?: string) {
         void _name;
         return this.dbInstance;
+      }
+      get indexCreations() {
+        return this.dbInstance.indexCreations;
+      }
+      expire(id: string) {
+        this.dbInstance.expire(id);
       }
     }
 
@@ -134,11 +154,18 @@ describe("MongoStorage (integration or mock)", () => {
     const u2 = await storage.increment(key, 2000);
     expect(u2.used).toBeGreaterThanOrEqual(u1.used);
 
+    // An expired document can remain until MongoDB's TTL monitor deletes it.
+    mock.expire(`next-limitr:${key}`);
+    const newWindow = await storage.increment(key, 2000);
+    expect(newWindow.used).toBe(1);
+    expect(newWindow.reset).toBeGreaterThan(Math.floor(Date.now() / 1000));
+
     await storage.decrement(key);
     const u3 = await storage.increment(key, 2000);
     expect(u3.used).toBeGreaterThanOrEqual(1);
 
     await storage.reset(key);
     await storage.close();
+    expect(mock.indexCreations).toBe(1);
   });
 });

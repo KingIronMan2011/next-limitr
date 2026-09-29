@@ -1,4 +1,4 @@
-import { StorageAdapter, RateLimitUsage } from "../types";
+import { StorageAdapter, RateLimitUsage } from "../types.js";
 
 interface MemoryRecord {
   count: number;
@@ -6,14 +6,12 @@ interface MemoryRecord {
 }
 
 export class MemoryStorage implements StorageAdapter {
-  private storage: Map<string, MemoryRecord>;
+  private readonly storage = new Map<string, MemoryRecord>();
+  private lastCleanup = 0;
 
-  constructor() {
-    this.storage = new Map();
-  }
-
-  private cleanup(): void {
-    const now = Date.now();
+  private cleanup(now: number): void {
+    if (now - this.lastCleanup < 60_000) return;
+    this.lastCleanup = now;
     for (const [key, record] of this.storage.entries()) {
       if (now >= record.resetTime) {
         this.storage.delete(key);
@@ -22,9 +20,8 @@ export class MemoryStorage implements StorageAdapter {
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
-    this.cleanup();
-
     const now = Date.now();
+    this.cleanup(now);
     const record = this.storage.get(key);
     const limit = Number.MAX_SAFE_INTEGER;
 
@@ -47,7 +44,6 @@ export class MemoryStorage implements StorageAdapter {
     }
 
     record.count += 1;
-    this.storage.set(key, record);
 
     const used = record.count;
     const remaining = Math.max(limit - used, 0);
@@ -64,7 +60,6 @@ export class MemoryStorage implements StorageAdapter {
     const record = this.storage.get(key);
     if (record && record.count > 0) {
       record.count -= 1;
-      this.storage.set(key, record);
     }
   }
 

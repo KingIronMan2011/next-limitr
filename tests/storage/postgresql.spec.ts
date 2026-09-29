@@ -37,11 +37,13 @@ describe("PostgresStorage (integration or mock)", () => {
     // Lightweight in-memory MockPool to exercise PostgresStorage logic without a DB.
     class MockPool {
       private store = new Map<string, { count: number; expireAt: number }>();
+      schemaQueries = 0;
       async connect() {
         const client = {
           query: async (sql: string, params?: unknown[]) => {
             // CREATE / INDEX no-op
             if (/CREATE TABLE/i.test(sql) || /CREATE INDEX/i.test(sql)) {
+              this.schemaQueries += 1;
               return { rows: [] };
             }
             // INSERT ... ON CONFLICT ... RETURNING ...
@@ -110,5 +112,6 @@ describe("PostgresStorage (integration or mock)", () => {
 
     await storage.reset(key);
     await storage.close();
+    expect(pool.schemaQueries).toBe(1);
   });
 });

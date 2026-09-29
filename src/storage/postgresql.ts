@@ -1,12 +1,13 @@
 import { Pool, PoolClient, Client } from "pg";
 import type { PoolConfig } from "pg";
-import { StorageAdapter, RateLimitUsage, PostgresConfig } from "../types";
+import { StorageAdapter, RateLimitUsage, PostgresConfig } from "../types.js";
 
 export class PostgresStorage implements StorageAdapter {
   private pool: Pool | Client;
   private readonly ownsClient: boolean;
   private readonly keyPrefix = "next-limitr:";
   private readonly table = "rate_limits";
+  private tablePromise?: Promise<void>;
 
   constructor(config: PostgresConfig | Pool | Client) {
     if (this.isPgClient(config)) {
@@ -30,14 +31,6 @@ export class PostgresStorage implements StorageAdapter {
 
       this.pool = new Pool(conn);
       this.ownsClient = true;
-
-      // warm up pool (safe because we created a Pool)
-      (this.pool as Pool)
-        .connect()
-        .then((c) => c.release())
-        .catch(() => {});
-      // ensure table exists asynchronously
-      this.ensureTable().catch(() => {});
     }
   }
 
@@ -68,7 +61,7 @@ export class PostgresStorage implements StorageAdapter {
     return this.pool as Client;
   }
 
-  private async ensureTable(): Promise<void> {
+  private async initializeTable(): Promise<void> {
     const client = await this.getRawClient();
     const release = this.isPoolClient(client)
       ? client.release.bind(client)
@@ -81,12 +74,18 @@ export class PostgresStorage implements StorageAdapter {
           expire_at TIMESTAMPTZ
         );`,
       );
-      await client.query(
-        `CREATE INDEX IF NOT EXISTS ${this.table}_id_idx ON ${this.table} (id);`,
-      );
     } finally {
       if (release) release();
     }
+  }
+
+  private ensureTable(): Promise<void> {
+    return (this.tablePromise ??= this.initializeTable().catch(
+      (error: unknown) => {
+        this.tablePromise = undefined;
+        throw error;
+      },
+    ));
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {

@@ -107,11 +107,11 @@ export const GET = withRateLimit({
 
 ### Basic Options
 
-| Option     | Type                | Default        | Description                                          |
-| ---------- | ------------------- | -------------- | ---------------------------------------------------- |
-| `limit`    | `number`            | `100`          | Maximum number of requests allowed within the window |
-| `windowMs` | `number`            | `60000`        | Time window in milliseconds                          |
-| `strategy` | `RateLimitStrategy` | `FIXED_WINDOW` | Rate limiting strategy                               |
+| Option     | Type                | Default        | Description                                            |
+| ---------- | ------------------- | -------------- | ------------------------------------------------------ |
+| `limit`    | `number`            | `100`          | Maximum number of requests allowed within the window   |
+| `windowMs` | `number`            | `60000`        | Time window in milliseconds                            |
+| `strategy` | `RateLimitStrategy` | `FIXED_WINDOW` | Fixed-window strategy (the currently implemented mode) |
 
 ### Storage Options
 
@@ -141,7 +141,8 @@ Notes on hierarchical merging:
 - Objects are merged recursively from global -> route override.
 - Arrays in route overrides replace arrays from globals.
 - Primitive values in overrides replace global primitives.
-- Route patterns support exact paths, prefix wildcards ("/api/foo/_"), and a global "_" key.
+- Route patterns support exact paths, prefix wildcards (`/api/foo/*`), and a global `*` key. Exact matches win, followed by the longest matching prefix.
+- Storage is reused for requests handled by the same route configuration. Memory storage remains local to one server process.
 
 ## Response Headers
 
@@ -157,6 +158,7 @@ The middleware adds standard rate limit headers to responses:
 1. Choose the right storage:
    - Use `memory` for development or single-instance deployments.
    - Use `redis` (or another persistent adapter) for production and distributed systems.
+   - Cloudflare KV is best effort for rate limits because writes to the same key are limited and values are eventually consistent. Use Redis or a Durable Object when strict limits matter.
 2. Configure per-route overrides for high-value or sensitive endpoints.
 3. Use `getLimitForRequest` to implement tiered quotas (e.g., premium vs free users).
 4. Attach monitoring or webhook handlers to receive alerts on rate limit events.

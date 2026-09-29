@@ -1,5 +1,5 @@
 import { MongoClient, type Collection, type MongoClientOptions } from "mongodb";
-import { StorageAdapter, RateLimitUsage, MongoConfig } from "../types";
+import { StorageAdapter, RateLimitUsage, MongoConfig } from "../types.js";
 
 export class MongoStorage implements StorageAdapter {
   private client: MongoClient;
@@ -12,6 +12,7 @@ export class MongoStorage implements StorageAdapter {
   private readonly ownsClient: boolean;
   private dbName = "next-limitr";
   private collName = "rate_limits";
+  private collectionPromise?: Promise<void>;
 
   constructor(config: MongoConfig | MongoClient) {
     if (this.isMongoClient(config)) {
@@ -24,8 +25,6 @@ export class MongoStorage implements StorageAdapter {
       const options: MongoClientOptions = cfg.options ?? {};
       this.client = new MongoClient(uri, options);
       this.ownsClient = true;
-      // connect in background
-      this.client.connect().catch(() => {});
       // honor optional db/collection from config
       this.dbName = cfg.db ?? this.dbName;
       this.collName = cfg.collection ?? this.collName;
@@ -44,35 +43,57 @@ export class MongoStorage implements StorageAdapter {
     return `${this.keyPrefix}${key}`;
   }
 
-  private async ensureCollection(): Promise<void> {
-    if (this.collection) return;
-
-    // Ensure connection using the public API. Calling connect() on an already-connected client is safe.
-    if (this.ownsClient) {
-      await this.client.connect().catch(() => {});
-    }
-
+  private async initializeCollection(): Promise<void> {
+    if (this.ownsClient) await this.client.connect();
     const db = this.client.db(this.dbName);
     this.collection = db.collection(this.collName);
+    await this.collection.createIndex(
+      { expireAt: 1 },
+      { expireAfterSeconds: 0 },
+    );
+  }
 
-    // ensure TTL index on expireAt
-    await this.collection
-      .createIndex({ expireAt: 1 }, { expireAfterSeconds: 0 })
-      .catch(() => {});
+  private ensureCollection(): Promise<void> {
+    return (this.collectionPromise ??= this.initializeCollection().catch(
+      (error: unknown) => {
+        this.collectionPromise = undefined;
+        throw error;
+      },
+    ));
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
     await this.ensureCollection();
     const redisKey = this.getKey(key);
-    const expireAt = new Date(Date.now() + windowMs);
+    const expired = {
+      $lte: [{ $ifNull: ["$expireAt", new Date(0)] }, "$$NOW"],
+    };
 
-    // Atomic upsert: increment count, set expireAt on insert only.
+    // Reset expired windows during the atomic update. TTL deletion is asynchronous.
     const res = await this.collection.findOneAndUpdate(
       { _id: redisKey },
-      {
-        $inc: { count: 1 },
-        $setOnInsert: { expireAt },
-      },
+      [
+        {
+          $set: {
+            count: {
+              $cond: [expired, 1, { $add: [{ $ifNull: ["$count", 0] }, 1] }],
+            },
+            expireAt: {
+              $cond: [
+                expired,
+                {
+                  $dateAdd: {
+                    startDate: "$$NOW",
+                    unit: "millisecond",
+                    amount: windowMs,
+                  },
+                },
+                "$expireAt",
+              ],
+            },
+          },
+        },
+      ],
       { upsert: true, returnDocument: "after" },
     );
 
@@ -95,9 +116,9 @@ export class MongoStorage implements StorageAdapter {
 
     const count =
       typeof doc.count === "number" ? doc.count : Number(doc.count || 0);
-    const effectiveExpire = doc.expireAt ?? expireAt;
-    const ttl = Math.max(effectiveExpire.getTime() - Date.now(), 0);
-    const reset = Math.floor((Date.now() + ttl) / 1000);
+    if (!doc.expireAt)
+      throw new Error("MongoDB transaction failed: missing expiry");
+    const reset = Math.floor(doc.expireAt.getTime() / 1000);
 
     const limit = Number.MAX_SAFE_INTEGER;
     const remaining = Math.max(limit - count, 0);

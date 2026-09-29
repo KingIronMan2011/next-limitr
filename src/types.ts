@@ -23,13 +23,22 @@ export type KVNamespaceLike = {
   put(
     key: string,
     value: string,
-    options?: { expiration?: number | Date; expirationTtl?: number },
+    options?: {
+      expiration?: number | Date;
+      expirationTtl?: number;
+      metadata?: { resetAt: number };
+    },
   ): Promise<void>;
   delete(key: string): Promise<void>;
   list?: (opts?: {
     prefix?: string;
     limit?: number;
-  }) => Promise<{ keys: { name: string }[] }>;
+    cursor?: string;
+  }) => Promise<{
+    keys: { name: string; metadata?: unknown }[];
+    list_complete?: boolean;
+    cursor?: string;
+  }>;
 };
 
 export interface RedisConfig {
@@ -102,6 +111,8 @@ export interface RateLimitOptions {
   mongoClient?: MongoClient;
   postgresConfig?: PostgresConfig;
   postgresClient?: Pool | Client;
+  edgeConfig?: EdgeConfig;
+  routes?: Record<string, Partial<RateLimitOptions>>;
 
   // Webhook and alert options
   webhook?: WebhookConfig;

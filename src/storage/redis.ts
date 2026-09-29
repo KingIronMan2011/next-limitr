@@ -1,5 +1,24 @@
 import { createClient, type RedisClientType } from "redis";
-import { StorageAdapter, RateLimitUsage, RedisConfig } from "../types";
+import { StorageAdapter, RateLimitUsage, RedisConfig } from "../types.js";
+const INCREMENT_SCRIPT = `
+  local v = redis.call("INCR", KEYS[1])
+  local ttl = redis.call("PTTL", KEYS[1])
+  if ttl < 0 then
+    redis.call("PEXPIRE", KEYS[1], ARGV[1])
+    ttl = ARGV[1]
+  end
+  return {v, ttl}
+`;
+
+const DECREMENT_SCRIPT = `
+  local v = redis.call("GET", KEYS[1])
+  if not v then return nil end
+  local n = tonumber(v)
+  if n > 0 then
+    return redis.call("DECR", KEYS[1])
+  end
+  return n
+`;
 
 type ExecReply =
   | number
@@ -19,28 +38,7 @@ export class RedisStorage implements StorageAdapter {
   private client: RedisClientType;
   private readonly keyPrefix = "next-limitr:";
   private readonly ownsClient: boolean;
-
-  // Lua script for atomic increment + ensure TTL (returns [count, ttl_ms])
-  private readonly incrScript = `
-    local v = redis.call("INCR", KEYS[1])
-    local ttl = redis.call("PTTL", KEYS[1])
-    if ttl < 0 then
-      redis.call("PEXPIRE", KEYS[1], ARGV[1])
-      ttl = ARGV[1]
-    end
-    return {v, ttl}
-  `;
-
-  // Lua script for safe decrement (only decrement if > 0). returns new value or nil.
-  private readonly decrScript = `
-    local v = redis.call("GET", KEYS[1])
-    if not v then return nil end
-    local n = tonumber(v)
-    if n > 0 then
-      return redis.call("DECR", KEYS[1])
-    end
-    return n
-  `;
+  private connectPromise?: Promise<RedisClientType>;
 
   constructor(config: RedisConfig | RedisClientType) {
     if (isRedisClient(config)) {
@@ -58,8 +56,16 @@ export class RedisStorage implements StorageAdapter {
         database: cfg.db,
       });
       this.ownsClient = true;
-      this.client.connect().catch(() => {});
     }
+  }
+
+  private async ensureConnected(): Promise<void> {
+    if (!this.ownsClient) return;
+    this.connectPromise ??= this.client.connect().catch((error: unknown) => {
+      this.connectPromise = undefined;
+      throw error;
+    });
+    await this.connectPromise;
   }
 
   private getKey(key: string): string {
@@ -100,10 +106,11 @@ export class RedisStorage implements StorageAdapter {
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
+    await this.ensureConnected();
     const redisKey = this.getKey(key);
 
     // Use atomic Lua script to INCR and ensure PEXPIRE is set
-    const evalResult = (await this.client.eval(this.incrScript, {
+    const evalResult = (await this.client.eval(INCREMENT_SCRIPT, {
       keys: [redisKey],
       arguments: [String(windowMs)],
     })) as unknown as ExecReply[] | null;
@@ -131,26 +138,29 @@ export class RedisStorage implements StorageAdapter {
   }
 
   async decrement(key: string): Promise<void> {
+    await this.ensureConnected();
     const redisKey = this.getKey(key);
 
     // Atomic decrement only if value > 0
-    await this.client.eval(this.decrScript, {
+    await this.client.eval(DECREMENT_SCRIPT, {
       keys: [redisKey],
       arguments: [],
     });
   }
 
   async reset(key: string): Promise<void> {
+    await this.ensureConnected();
     await this.client.del(this.getKey(key));
   }
 
   async close(): Promise<void> {
-    if (this.ownsClient) {
+    if (this.ownsClient && this.client.isOpen) {
       await this.client.quit();
     }
   }
 
   async getActiveKeys(): Promise<string[]> {
+    await this.ensureConnected();
     const keys = await this.client.keys(`${this.keyPrefix}*`);
     return keys.map((k) => k.slice(this.keyPrefix.length));
   }

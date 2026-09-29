@@ -1,10 +1,28 @@
-import {
-  StorageAdapter,
-  RateLimitUsage,
-  KVNamespaceLike,
-  UpstashConfig,
-  EdgeConfig,
-} from "../types";
+import type { StorageAdapter, RateLimitUsage, EdgeConfig } from "../types.js";
+const INCREMENT_SCRIPT = `
+  local v = redis.call("INCR", KEYS[1])
+  local ttl = redis.call("PTTL", KEYS[1])
+  if ttl < 0 then
+    redis.call("PEXPIRE", KEYS[1], ARGV[1])
+    ttl = ARGV[1]
+  end
+  return {v, ttl}
+`;
+
+const DECREMENT_SCRIPT = `
+  local v = redis.call("GET", KEYS[1])
+  if not v then return nil end
+  local n = tonumber(v)
+  if n > 0 then
+    return redis.call("DECR", KEYS[1])
+  end
+  return n
+`;
+
+interface KVRecord {
+  count: number;
+  resetAt: number;
+}
 
 /**
  * EdgeStorage supports Upstash (REST Redis) and Cloudflare KV.
@@ -13,114 +31,101 @@ import {
  */
 export class EdgeStorage implements StorageAdapter {
   private readonly keyPrefix = "next-limitr:";
-  private readonly kind: EdgeConfig["kind"];
-  private readonly upstash?: UpstashConfig;
-  private readonly kv?: KVNamespaceLike;
 
-  // Lua scripts reused from redis adapter (works if Upstash supports EVAL)
-  private readonly incrScript = `
-    local v = redis.call("INCR", KEYS[1])
-    local ttl = redis.call("PTTL", KEYS[1])
-    if ttl < 0 then
-      redis.call("PEXPIRE", KEYS[1], ARGV[1])
-      ttl = ARGV[1]
-    end
-    return {v, ttl}
-  `;
-
-  private readonly decrScript = `
-    local v = redis.call("GET", KEYS[1])
-    if not v then return nil end
-    local n = tonumber(v)
-    if n > 0 then
-      return redis.call("DECR", KEYS[1])
-    end
-    return n
-  `;
-
-  constructor(cfg: EdgeConfig) {
-    this.kind = cfg.kind;
-    if (cfg.kind === "upstash") {
-      this.upstash = cfg.upstash;
-    } else {
-      this.kv = cfg.cf.kv;
-    }
-  }
+  constructor(private readonly config: EdgeConfig) {}
 
   private getKey(key: string): string {
     return `${this.keyPrefix}${key}`;
   }
 
-  // Helpers for Upstash: send a single command (array of strings) as JSON body.
   private async upstashCommand(cmd: string[]): Promise<unknown> {
-    if (!this.upstash) throw new Error("Upstash config missing");
-    const url = this.upstash.url.replace(/\/+$/, "") + "/commands";
-    const res = await fetch(url, {
+    if (this.config.kind !== "upstash")
+      throw new Error("Upstash config missing");
+    const { url, token } = this.config.upstash;
+    const res = await fetch(url.replace(/\/+$/, ""), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(this.upstash.token
-          ? { Authorization: `Bearer ${this.upstash.token}` }
-          : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(cmd),
+      signal: AbortSignal.timeout(5_000),
     });
-    const json = await res.json().catch(() => null);
-    return json;
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      throw new Error(`Invalid Upstash response: HTTP ${res.status}`);
+    }
+    if (!json || typeof json !== "object" || Array.isArray(json)) {
+      throw new Error("Invalid Upstash response");
+    }
+    if ("error" in json) {
+      throw new Error(`Upstash command failed: ${String(json.error)}`);
+    }
+    if (!res.ok) throw new Error(`Upstash request failed: HTTP ${res.status}`);
+    if (!("result" in json))
+      throw new Error("Upstash response is missing result");
+    return json.result;
   }
 
-  // Attempt to extract numeric replies from various response shapes.
-  private extractNumber(reply: unknown): number {
-    if (reply === null || reply === undefined) throw new Error("Empty reply");
-    if (typeof reply === "number") return reply;
-    if (typeof reply === "string") {
-      const n = Number(reply);
-      if (Number.isFinite(n)) return n;
+  private parseNumber(value: unknown): number {
+    if (typeof value !== "number" && typeof value !== "string") {
+      throw new Error("Invalid numeric reply from Upstash");
     }
-    if (Array.isArray(reply) && reply.length > 0) {
-      for (const v of reply) {
-        const maybe = this.tryParseNumber(v);
-        if (maybe !== null) return maybe;
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      throw new Error("Invalid numeric reply from Upstash");
+    }
+    return number;
+  }
+
+  private readKVRecord(raw: string | null): KVRecord | null {
+    if (!raw) return null;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object") return null;
+      if (!("count" in value) || !("resetAt" in value)) return null;
+      if (
+        typeof value.count !== "number" ||
+        typeof value.resetAt !== "number" ||
+        !Number.isFinite(value.count) ||
+        !Number.isFinite(value.resetAt)
+      ) {
+        return null;
       }
+      return { count: value.count, resetAt: value.resetAt };
+    } catch {
+      return null;
     }
-    const maybe = this.tryParseNumber(reply);
-    if (maybe !== null) return maybe;
-    throw new Error("Invalid numeric reply");
   }
 
-  private tryParseNumber(v: unknown): number | null {
-    if (typeof v === "number") return v;
-    if (typeof v === "string") {
-      const n = Number(v);
-      return Number.isFinite(n) ? n : null;
-    }
-    return null;
+  private async writeKVRecord(key: string, record: KVRecord): Promise<void> {
+    if (this.config.kind !== "cloudflare")
+      throw new Error("Cloudflare KV missing");
+    const secondsUntilReset = Math.ceil((record.resetAt - Date.now()) / 1000);
+    await this.config.cf.kv.put(key, JSON.stringify(record), {
+      expirationTtl: Math.max(60, secondsUntilReset),
+      metadata: { resetAt: record.resetAt },
+    });
   }
 
   async increment(key: string, windowMs: number): Promise<RateLimitUsage> {
     const k = this.getKey(key);
 
-    if (this.kind === "upstash") {
-      // Use EVAL script for atomic increment + ensure TTL (best-effort if Upstash supports EVAL)
-      const body = ["EVAL", this.incrScript, "1", k, String(windowMs)];
-      const json = await this.upstashCommand(body);
-      // Upstash REST responses vary; attempt to find returned array [count, ttl]
-      // Common shapes: { result: [v, ttl] } or [v, ttl]
-      let result: unknown;
-      if (
-        json &&
-        typeof json === "object" &&
-        !Array.isArray(json) &&
-        "result" in (json as Record<string, unknown>)
-      ) {
-        result = (json as Record<string, unknown>)["result"];
-      } else {
-        result = json;
+    if (this.config.kind === "upstash") {
+      const result = await this.upstashCommand([
+        "EVAL",
+        INCREMENT_SCRIPT,
+        "1",
+        k,
+        String(windowMs),
+      ]);
+      if (!Array.isArray(result) || result.length !== 2) {
+        throw new Error("Invalid Upstash increment result");
       }
-      const arr = Array.isArray(result) ? result : (result as unknown[]);
-      if (!arr || arr.length < 2) throw new Error("Upstash increment failed");
-      const count = this.extractNumber(arr[0]);
-      const ttl = this.extractNumber(arr[1]);
+      const count = this.parseNumber(result[0]);
+      const ttl = this.parseNumber(result[1]);
       const effectiveTtl = ttl > 0 ? ttl : windowMs;
       const reset = Math.floor((Date.now() + effectiveTtl) / 1000);
       const limit = Number.MAX_SAFE_INTEGER;
@@ -128,60 +133,100 @@ export class EdgeStorage implements StorageAdapter {
       return { limit, remaining, reset, used: count };
     }
 
-    // Cloudflare KV fallback: non-atomic best-effort
-    if (!this.kv) throw new Error("Cloudflare KV missing");
-    const raw = (await this.kv.get(k, "text")) ?? "0";
-    const prev = Number(raw) || 0;
-    const next = prev + 1;
-    // Use expirationTtl (seconds)
-    const ttlSec = Math.ceil(windowMs / 1000);
-    await this.kv.put(k, String(next), { expirationTtl: ttlSec });
-    const reset = Math.floor((Date.now() + ttlSec * 1000) / 1000);
+    const now = Date.now();
+    const record = this.readKVRecord(await this.config.cf.kv.get(k, "text"));
+    const active = record !== null && record.resetAt > now;
+    const next: KVRecord = {
+      count: active ? record.count + 1 : 1,
+      resetAt: active ? record.resetAt : now + windowMs,
+    };
+    await this.writeKVRecord(k, next);
     const limit = Number.MAX_SAFE_INTEGER;
-    const remaining = Math.max(limit - next, 0);
-    return { limit, remaining, reset, used: next };
+    return {
+      limit,
+      remaining: Math.max(limit - next.count, 0),
+      reset: Math.floor(next.resetAt / 1000),
+      used: next.count,
+    };
   }
 
   async decrement(key: string): Promise<void> {
     const k = this.getKey(key);
-    if (this.kind === "upstash") {
-      // Best-effort: call decr Lua via EVAL
-      const body = ["EVAL", this.decrScript, "1", k];
-      await this.upstashCommand(body);
+    if (this.config.kind === "upstash") {
+      await this.upstashCommand(["EVAL", DECREMENT_SCRIPT, "1", k]);
       return;
     }
-    if (!this.kv) throw new Error("Cloudflare KV missing");
-    const raw = (await this.kv.get(k, "text")) ?? "0";
-    const prev = Number(raw) || 0;
-    const next = Math.max(0, prev - 1);
-    // Keep existing TTL unknown; set without TTL (best-effort)
-    await this.kv.put(k, String(next));
+    const record = this.readKVRecord(await this.config.cf.kv.get(k, "text"));
+    if (!record || record.resetAt <= Date.now() || record.count <= 0) return;
+    await this.writeKVRecord(k, { ...record, count: record.count - 1 });
   }
 
   async reset(key: string): Promise<void> {
     const k = this.getKey(key);
-    if (this.kind === "upstash") {
+    if (this.config.kind === "upstash") {
       await this.upstashCommand(["DEL", k]);
       return;
     }
-    if (!this.kv) throw new Error("Cloudflare KV missing");
-    await this.kv.delete(k);
+    await this.config.cf.kv.delete(k);
   }
 
-  async close(): Promise<void> {
-    // Edge stores typically don't need explicit close
-    return;
-  }
+  async close(): Promise<void> {}
 
   async getActiveKeys(): Promise<string[]> {
     const prefix = this.keyPrefix;
-    if (this.kind === "upstash") {
-      // Upstash REST doesn't expose keys listing via REST in a stable way; return empty.
-      return [];
+    if (this.config.kind === "upstash") {
+      const keys = new Set<string>();
+      let cursor = "0";
+      do {
+        const response = await this.upstashCommand([
+          "SCAN",
+          cursor,
+          "MATCH",
+          `${prefix}*`,
+          "COUNT",
+          "1000",
+        ]);
+        if (
+          !Array.isArray(response) ||
+          response.length !== 2 ||
+          !Array.isArray(response[1])
+        ) {
+          throw new Error("Invalid Upstash SCAN result");
+        }
+        cursor = String(response[0]);
+        for (const key of response[1]) {
+          if (typeof key === "string" && key.startsWith(prefix)) {
+            keys.add(key.slice(prefix.length));
+          }
+        }
+      } while (cursor !== "0");
+      return [...keys];
     }
-    if (!this.kv) throw new Error("Cloudflare KV missing");
-    if (!this.kv.list) return [];
-    const res = await this.kv.list({ prefix });
-    return (res.keys || []).map((k) => k.name.slice(prefix.length));
+    const kv = this.config.cf.kv;
+    if (!kv.list) return [];
+    const keys: string[] = [];
+    const now = Date.now();
+    let cursor: string | undefined;
+    let complete = false;
+    while (!complete) {
+      const page = await kv.list({ prefix, cursor });
+      keys.push(
+        ...page.keys
+          .filter((key) => {
+            const metadata = key.metadata;
+            if (!metadata || typeof metadata !== "object") return true;
+            const resetAt = (metadata as { resetAt?: unknown }).resetAt;
+            return typeof resetAt !== "number" || resetAt > now;
+          })
+          .map((key) => key.name.slice(prefix.length)),
+      );
+      complete = page.list_complete !== false;
+      if (complete) break;
+      if (!page.cursor || page.cursor === cursor) {
+        throw new Error("Cloudflare KV listing did not advance");
+      }
+      cursor = page.cursor;
+    }
+    return keys;
   }
 }
