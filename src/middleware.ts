@@ -9,6 +9,7 @@ import type {
 import { RateLimitStrategy } from "./types";
 import { MemoryStorage } from "./storage/memory";
 import { RedisStorage } from "./storage/redis";
+import { IORedisStorage } from "./storage/ioredis";
 import { MongoStorage } from "./storage/mongodb";
 import { PostgresStorage } from "./storage/postgresql";
 import { EdgeStorage } from "./storage/edge";
@@ -131,6 +132,15 @@ export function withRateLimit(options: RateLimitOptions = {}) {
         }
         storage = new RedisStorage(
           finalOptions.redisClient || finalOptions.redisConfig!,
+        );
+      } else if (finalOptions.storage === "ioredis") {
+        if (!finalOptions.ioredisConfig && !finalOptions.ioredisClient) {
+          throw new Error(
+            "ioredis configuration or client is required when using ioredis storage",
+          );
+        }
+        storage = new IORedisStorage(
+          finalOptions.ioredisClient || finalOptions.ioredisConfig!,
         );
       } else if (finalOptions.storage === "mongodb") {
         if (!finalOptions.mongoConfig && !finalOptions.mongoClient) {

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { RedisClientType } from "redis";
+import type IORedis from "ioredis";
 import type { MongoClient } from "mongodb";
 import type { Pool, Client } from "pg";
 
@@ -12,6 +13,7 @@ export enum RateLimitStrategy {
 export type StorageType =
   | "memory"
   | "redis"
+  | "ioredis"
   | "mongodb"
   | "postgresql"
   | "edge";
@@ -94,6 +96,8 @@ export interface RateLimitOptions {
   storage?: StorageType;
   redisConfig?: RedisConfig;
   redisClient?: RedisClientType;
+  ioredisConfig?: RedisConfig;
+  ioredisClient?: IORedis;
   mongoConfig?: MongoConfig;
   mongoClient?: MongoClient;
   postgresConfig?: PostgresConfig;

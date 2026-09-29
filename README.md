@@ -81,6 +81,28 @@ In this example:
 - /api/public uses a large limit and can be skipped conditionally.
 - Any fields omitted in a route override inherit from the global options.
 
+### Redis client choice
+
+Use `storage: "redis"` with `redisClient` for the `redis` package, or use
+`storage: "ioredis"` with `ioredisClient` for `ioredis`. Both accept an existing
+client or a host/port config (`redisConfig` or `ioredisConfig`). The adapter only
+closes clients it creates from config.
+
+```typescript
+import Redis from "ioredis";
+import { withRateLimit } from "@kingironman2011/next-limitr";
+import { NextResponse } from "next/server";
+
+const client = new Redis(process.env.REDIS_URL!);
+
+export const GET = withRateLimit({
+  storage: "ioredis",
+  ioredisClient: client,
+  limit: 100,
+  windowMs: 60_000,
+})(async () => NextResponse.json({ ok: true }));
+```
+
 ## Configuration Options
 
 ### Basic Options
@@ -93,14 +115,16 @@ In this example:
 
 ### Storage Options
 
-| Option           | Type                                                         | Default    | Description                                   |
-| ---------------- | ------------------------------------------------------------ | ---------- | --------------------------------------------- |
-| `storage`        | `"memory" \| "redis" \| "mongodb" \| "postgresql" \| "edge"` | `"memory"` | Storage backend to use                        |
-| `redisConfig`    | `RedisConfig`                                                | -          | Redis configuration (required if using Redis) |
-| `redisClient`    | `Redis`                                                      | -          | Existing Redis client instance                |
-| `mongoConfig`    | `MongoConfig`                                                | -          | MongoDB configuration or client               |
-| `postgresConfig` | `PostgresConfig`                                             | -          | PostgreSQL configuration or client            |
-| `edgeConfig`     | `EdgeConfig`                                                 | -          | Edge KV configuration (for edge storage)      |
+| Option           | Type                                                                      | Default    | Description                                   |
+| ---------------- | ------------------------------------------------------------------------- | ---------- | --------------------------------------------- |
+| `storage`        | `"memory" \| "redis" \| "ioredis" \| "mongodb" \| "postgresql" \| "edge"` | `"memory"` | Storage backend to use                        |
+| `redisConfig`    | `RedisConfig`                                                             | -          | Redis configuration (required if using Redis) |
+| `redisClient`    | `RedisClientType`                                                         | -          | Existing `redis` client instance              |
+| `ioredisConfig`  | `RedisConfig`                                                             | -          | Configuration for an ioredis client           |
+| `ioredisClient`  | `IORedis`                                                                 | -          | Existing ioredis client instance              |
+| `mongoConfig`    | `MongoConfig`                                                             | -          | MongoDB configuration or client               |
+| `postgresConfig` | `PostgresConfig`                                                          | -          | PostgreSQL configuration or client            |
+| `edgeConfig`     | `EdgeConfig`                                                              | -          | Edge KV configuration (for edge storage)      |
 
 ### Advanced Options
 
